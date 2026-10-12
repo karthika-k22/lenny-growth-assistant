@@ -70,22 +70,22 @@ def save_chat_exchange(
         db.close()
 
 
+
 def save_generated_artifact(
+    session_id: str,
     title: str,
     content: str,
     provider: str,
 ):
-    """Persist a generated essay."""
+    """Persist a generated essay under the correct conversation."""
     db = SessionLocal()
-    session_id = "essay-session"
-
     try:
         conversation = db.get(Conversation, session_id)
 
         if conversation is None:
             conversation = Conversation(
                 id=session_id,
-                title="Ship 30 for 30 Essays",
+                title=title[:100],
             )
             db.add(conversation)
             db.flush()
@@ -380,10 +380,15 @@ async def chat(request: ChatRequest):
         )
 
 
+
 class EssayRequest(BaseModel):
     topic: str = Field(min_length=3, max_length=500)
-    audience: str = Field(default="product managers and startup founders", max_length=300)
+    audience: str = Field(
+        default="product managers and startup founders",
+        max_length=300,
+    )
     provider: Literal["ollama", "openai"] = "ollama"
+    session_id: str = Field(default="default", min_length=1, max_length=100)
 
 
 class EssayResponse(BaseModel):
@@ -498,6 +503,7 @@ Finish with a clearly labeled "Actionable Takeaway" section.
 
         try:
             save_generated_artifact(
+                session_id=request.session_id,
                 title=title,
                 content=markdown,
                 provider=provider_name,
