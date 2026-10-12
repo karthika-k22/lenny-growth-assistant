@@ -11,8 +11,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from backend.rag import search_transcripts
-
-
 from backend.database import (
     SessionLocal,
     Conversation,
@@ -25,6 +23,10 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("lenny-assistant")
 
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
 
 def save_chat_exchange(
     session_id: str,
@@ -32,7 +34,7 @@ def save_chat_exchange(
     assistant_message: str,
     provider: str,
 ):
-    """Persist a user question and its assistant response."""
+    """Save a user question and assistant response."""
     db = SessionLocal()
     try:
         conversation = db.get(Conversation, session_id)
@@ -70,14 +72,13 @@ def save_chat_exchange(
         db.close()
 
 
-
 def save_generated_artifact(
     session_id: str,
     title: str,
     content: str,
     provider: str,
 ):
-    """Persist a generated essay under the correct conversation."""
+    """Save a generated essay."""
     db = SessionLocal()
     try:
         conversation = db.get(Conversation, session_id)
@@ -110,26 +111,25 @@ def save_generated_artifact(
     finally:
         db.close()
 
+
 app = FastAPI(
     title="The Lenny Growth Assistant",
     description="An AI assistant for product and growth questions.",
     version="0.3.0",
 )
 
+# Allow the deployed Vercel frontend and local development frontend.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "https://lenny-growth-assistant-jet.vercel.app",
     ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 
 class Message(BaseModel):
@@ -184,15 +184,13 @@ def build_instructions(sources: list[dict]) -> str:
     instructions = (
         "You are The Lenny Growth Assistant. Help with product management, "
         "startups, user growth, experimentation, and leadership. "
-        "Answer follow-up questions using the conversation history. "
+        "Answer follow-up questions using conversation history. "
         "Be practical, specific, and concise. Use Markdown headings and bullets. "
-        "Use the supplied podcast transcript excerpts when relevant. "
-        "Cite transcript evidence using the exact source filename, "
-        "for example [Source: product_growth.txt]. Never invent citations. "
-        "Only claim that something was said in a podcast when the excerpts "
-        "support that claim. If no excerpt supports the answer, say so clearly "
-        "and distinguish general knowledge from transcript evidence. "
-        "Do not invent statistics, quotes, episode details, or speaker claims."
+        "Use podcast transcript excerpts when relevant. Cite transcript evidence "
+        "using the exact source filename, for example [Source: product_growth.txt]. "
+        "Never invent citations, statistics, quotes, episode details, or speaker claims. "
+        "If no excerpt supports an answer, say so and distinguish general knowledge "
+        "from transcript evidence."
     )
 
     if sources:
@@ -205,7 +203,7 @@ def build_instructions(sources: list[dict]) -> str:
     else:
         source_text = (
             "No matching podcast transcript excerpts were found. "
-            "Do not claim that the podcast supports your answer."
+            "Do not claim that the podcast supports the answer."
         )
 
     return (
@@ -220,14 +218,10 @@ async def chat(request: ChatRequest):
     sources = search_transcripts(request.message, top_k=4)
     instructions = build_instructions(sources)
 
-    conversation = []
-    for item in request.history[-10:]:
-        conversation.append(
-            {
-                "role": item.role,
-                "content": item.content,
-            }
-        )
+    conversation = [
+        {"role": item.role, "content": item.content}
+        for item in request.history[-10:]
+    ]
 
     timestamp = datetime.now(timezone.utc).isoformat()
 
@@ -239,17 +233,8 @@ async def chat(request: ChatRequest):
                 if not api_key:
                     raise HTTPException(
                         status_code=503,
-                        detail=(
-                            "OpenAI is not configured. Add OPENAI_API_KEY "
-                            "to your local .env file to enable it."
-                        ),
+                        detail="OpenAI is not configured. Configure OPENAI_API_KEY.",
                     )
-
-                messages = [
-                    {"role": "system", "content": instructions},
-                    *conversation,
-                    {"role": "user", "content": request.message},
-                ]
 
                 response = await client.post(
                     "https://api.openai.com/v1/chat/completions",
@@ -259,20 +244,22 @@ async def chat(request: ChatRequest):
                     },
                     json={
                         "model": OPENAI_MODEL,
-                        "messages": messages,
+                        "messages": [
+                            {"role": "system", "content": instructions},
+                            *conversation,
+                            {"role": "user", "content": request.message},
+                        ],
                         "max_tokens": 450,
                     },
                 )
                 response.raise_for_status()
                 data = response.json()
-
                 answer = (
                     data.get("choices", [{}])[0]
                     .get("message", {})
                     .get("content", "")
                     or ""
                 ).strip()
-
                 provider_name = f"openai/{OPENAI_MODEL}"
 
             else:
@@ -302,7 +289,6 @@ async def chat(request: ChatRequest):
                 )
                 response.raise_for_status()
                 data = response.json()
-
                 answer = (data.get("response") or "").strip()
                 provider_name = f"ollama/{OLLAMA_MODEL}"
 
@@ -320,9 +306,7 @@ async def chat(request: ChatRequest):
                 provider=provider_name,
             )
         except Exception:
-            logger.exception(
-                "Chat response succeeded but persistence failed"
-            )
+            logger.exception("Chat succeeded but saving history failed")
 
         return ChatResponse(
             answer=answer,
@@ -341,7 +325,6 @@ async def chat(request: ChatRequest):
 
     except HTTPException:
         raise
-
     except httpx.ConnectError:
         logger.exception("Could not connect to the selected AI provider")
         raise HTTPException(
@@ -351,19 +334,14 @@ async def chat(request: ChatRequest):
                 "Check that the service is running and reachable."
             ),
         )
-
     except httpx.TimeoutException:
         logger.exception("AI provider request timed out")
         raise HTTPException(
             status_code=504,
             detail="The model took too long to respond. Please retry.",
         )
-
     except httpx.HTTPStatusError as exc:
-        logger.error(
-            "AI provider returned HTTP %s",
-            exc.response.status_code,
-        )
+        logger.error("AI provider returned HTTP %s", exc.response.status_code)
         raise HTTPException(
             status_code=502,
             detail=(
@@ -371,14 +349,12 @@ async def chat(request: ChatRequest):
                 f"(HTTP {exc.response.status_code}). Check its configuration."
             ),
         )
-
     except (ValueError, KeyError, IndexError):
         logger.exception("Could not parse the model response")
         raise HTTPException(
             status_code=502,
             detail="The selected AI provider returned an invalid response.",
         )
-
 
 
 class EssayRequest(BaseModel):
@@ -398,10 +374,9 @@ class EssayResponse(BaseModel):
     timestamp: str
 
 
-@app.post("/api/ship-30")
+@app.post("/api/ship-30", response_model=EssayResponse)
 async def generate_ship_30(request: EssayRequest):
-    """Generate a structured Ship 30 for 30-style essay."""
-
+    """Generate and save a structured Ship 30 for 30-style essay."""
 
     instructions = f"""
 You are an experienced essay writer creating a Ship 30 for 30-style essay.
@@ -409,23 +384,22 @@ You are an experienced essay writer creating a Ship 30 for 30-style essay.
 TOPIC: {request.topic}
 TARGET AUDIENCE: {request.audience}
 
-Write approximately 1,250 words. Aim for 1,100 to 1,400 words.
+Write approximately 1,250 words, aiming for 1,100 to 1,400 words.
 
 STRUCTURE:
-1. Start with a compelling, concrete hook that makes the reader care.
+1. Begin with a compelling, concrete hook.
 2. Introduce one clear central argument.
 3. Develop a logical narrative with useful Markdown headings.
 4. Use short paragraphs, specific examples, and practical explanations.
-5. Explain why the ideas matter to the target audience.
+5. Explain why the ideas matter to the audience.
 6. End with one specific, actionable takeaway.
 
 FACTUAL ACCURACY:
 - Never invent statistics, studies, citations, quotations, or research findings.
-- Do not attribute claims to real companies or people unless you can
-  reliably support those claims.
-- Do not imply this essay is based on podcast transcripts.
-- Use hypothetical examples only when clearly identified as hypothetical.
-- Prefer clear reasoning and practical guidance over unsupported facts.
+- Do not attribute claims to real companies or people without reliable support.
+- Do not imply the essay is based on podcast transcripts.
+- Clearly identify hypothetical examples.
+- Prefer clear reasoning over unsupported claims.
 - Avoid repetitive introductions and conclusions.
 
 OUTPUT:
@@ -439,10 +413,11 @@ Finish with a clearly labeled "Actionable Takeaway" section.
         async with httpx.AsyncClient(timeout=180.0) as client:
             if request.provider == "openai":
                 api_key = os.getenv("OPENAI_API_KEY")
+
                 if not api_key:
                     raise HTTPException(
                         status_code=503,
-                        detail="OpenAI is not configured. Use Ollama or configure an API key.",
+                        detail="OpenAI is not configured. Configure an API key.",
                     )
 
                 response = await client.post(
@@ -455,7 +430,10 @@ Finish with a clearly labeled "Actionable Takeaway" section.
                         "model": OPENAI_MODEL,
                         "messages": [
                             {"role": "system", "content": instructions},
-                            {"role": "user", "content": "Write the essay now."},
+                            {
+                                "role": "user",
+                                "content": "Write the essay now.",
+                            },
                         ],
                         "max_tokens": 3000,
                     },
@@ -494,7 +472,7 @@ Finish with a clearly labeled "Actionable Takeaway" section.
 
         title = next(
             (
-                line.lstrip("# ").strip()
+                line[2:].strip()
                 for line in markdown.splitlines()
                 if line.startswith("# ")
             ),
@@ -509,9 +487,7 @@ Finish with a clearly labeled "Actionable Takeaway" section.
                 provider=provider_name,
             )
         except Exception:
-            logger.exception(
-                "Essay generation succeeded but persistence failed"
-            )
+            logger.exception("Essay generated but saving it failed")
 
         return EssayResponse(
             title=title,
@@ -526,13 +502,13 @@ Finish with a clearly labeled "Actionable Takeaway" section.
         logger.exception("Essay generation timed out")
         raise HTTPException(
             status_code=504,
-            detail="Essay generation timed out. Try a shorter topic or retry.",
+            detail="Essay generation timed out. Try again.",
         )
     except httpx.ConnectError:
         logger.exception("Could not connect to the selected provider")
         raise HTTPException(
             status_code=503,
-            detail="Could not connect to the selected AI provider. Check that it is running.",
+            detail="Could not connect to the selected AI provider.",
         )
     except httpx.HTTPStatusError as exc:
         logger.error("Essay provider returned HTTP %s", exc.response.status_code)
@@ -647,4 +623,3 @@ async def list_artifacts():
         )
     finally:
         db.close()
-
