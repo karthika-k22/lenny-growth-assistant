@@ -12,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -20,27 +21,37 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 
+# Load environment variables from the project root.
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
-# Keep SQLite as the default for local development.
+# SQLite remains the default for local development.
 DATABASE_PATH = ROOT / "data" / "lenny_assistant.db"
 DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 database_url = os.getenv("DATABASE_URL", "").strip()
 
 if database_url:
-    # Support common PostgreSQL URLs with the installed psycopg driver.
     if database_url.startswith("postgres://"):
         database_url = database_url.replace(
-            "postgres://", "postgresql+psycopg://", 1
+            "postgres://", "postgresql+pg8000://", 1
         )
     elif database_url.startswith("postgresql://"):
         database_url = database_url.replace(
-            "postgresql://", "postgresql+psycopg://", 1
+            "postgresql://", "postgresql+pg8000://", 1
         )
 
-    engine = create_engine(database_url, pool_pre_ping=True)
+    url = make_url(database_url)
+    query = dict(url.query)
+    query.pop("sslmode", None)
+    query.pop("channel_binding", None)
+    url = url.set(query=query)
+
+    engine = create_engine(
+        url,
+        connect_args={"ssl_context": True},
+        pool_pre_ping=True,
+    )
 else:
     engine = create_engine(
         f"sqlite:///{DATABASE_PATH.as_posix()}",
@@ -61,7 +72,9 @@ class Base(DeclarativeBase):
 class Conversation(Base):
     __tablename__ = "conversations"
 
-    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    id: Mapped[str] = mapped_column(
+        String(100), primary_key=True
+    )
     title: Mapped[str] = mapped_column(
         String(300), default="New conversation"
     )
@@ -84,13 +97,17 @@ class Conversation(Base):
 class ChatMessage(Base):
     __tablename__ = "messages"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, index=True
+    )
     conversation_id: Mapped[str] = mapped_column(
         ForeignKey("conversations.id"), index=True
     )
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text)
-    provider: Mapped[str] = mapped_column(String(100), default="unknown")
+    provider: Mapped[str] = mapped_column(
+        String(100), default="unknown"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -104,7 +121,9 @@ class ChatMessage(Base):
 class GeneratedArtifact(Base):
     __tablename__ = "artifacts"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, index=True
+    )
     conversation_id: Mapped[str] = mapped_column(
         ForeignKey("conversations.id"), index=True
     )
@@ -113,11 +132,14 @@ class GeneratedArtifact(Base):
     artifact_type: Mapped[str] = mapped_column(
         String(50), default="markdown"
     )
-    provider: Mapped[str] = mapped_column(String(100), default="unknown")
+    provider: Mapped[str] = mapped_column(
+        String(100), default="unknown"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
     )
 
 
+# Create missing tables on the configured database.
 Base.metadata.create_all(bind=engine)

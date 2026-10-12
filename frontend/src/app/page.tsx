@@ -1,5 +1,4 @@
-﻿
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -25,7 +24,6 @@ type EssayResult = {
   provider: string;
   timestamp: string;
 };
-
 
 type SavedConversation = {
   id: string;
@@ -70,10 +68,15 @@ export default function Home() {
   );
   const [essay, setEssay] = useState<EssayResult | null>(null);
 
+  const [savedConversations, setSavedConversations] = useState<
+    SavedConversation[]
+  >([]);
+  const [savedArtifacts, setSavedArtifacts] = useState<SavedArtifact[]>([]);
+  const [sessionId, setSessionId] = useState("lenny-session");
 
-const [savedConversations, setSavedConversations] = useState<SavedConversation[]>([]);
-const [savedArtifacts, setSavedArtifacts] = useState<SavedArtifact[]>([]);
-const [sessionId, setSessionId] = useState("lenny-session");
+  // History loading state
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState("");
 
   async function sendMessage(text?: string) {
     const prompt = (text ?? question).trim();
@@ -123,6 +126,9 @@ const [sessionId, setSessionId] = useState("lenny-session");
           sources: data.sources ?? [],
         },
       ]);
+
+      // Refresh history after a successful chat response
+      void loadSavedHistory();
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "Could not connect to the backend."
@@ -165,8 +171,8 @@ const [sessionId, setSessionId] = useState("lenny-session");
         );
       }
 
-
       setEssay(data as EssayResult);
+      void loadSavedHistory();
     } catch (e) {
       setError(
         e instanceof Error
@@ -178,76 +184,88 @@ const [sessionId, setSessionId] = useState("lenny-session");
     }
   }
 
+  async function loadSavedHistory() {
+    setHistoryLoading(true);
+    setHistoryError("");
 
-async function loadSavedHistory() {
-  try {
-    const [conversationResponse, artifactResponse] = await Promise.all([
-      fetch("http://127.0.0.1:8000/api/conversations"),
-      fetch("http://127.0.0.1:8000/api/artifacts"),
-    ]);
+    try {
+      const [conversationResponse, artifactResponse] = await Promise.all([
+        fetch("http://127.0.0.1:8000/api/conversations"),
+        fetch("http://127.0.0.1:8000/api/artifacts"),
+      ]);
 
-    if (!conversationResponse.ok || !artifactResponse.ok) {
-      throw new Error("Could not load saved history.");
+      if (!conversationResponse.ok || !artifactResponse.ok) {
+        throw new Error("Could not load saved history. Try refreshing.");
+      }
+
+      const conversationData = await conversationResponse.json();
+      const artifactData = await artifactResponse.json();
+
+      setSavedConversations(conversationData.conversations ?? []);
+      setSavedArtifacts(artifactData.artifacts ?? []);
+    } catch (e) {
+      console.error("History loading failed:", e);
+      setHistoryError(
+        e instanceof Error
+          ? e.message
+          : "Could not connect to the backend."
+      );
+    } finally {
+      setHistoryLoading(false);
     }
-
-    const conversationData = await conversationResponse.json();
-    const artifactData = await artifactResponse.json();
-
-    setSavedConversations(conversationData.conversations ?? []);
-    setSavedArtifacts(artifactData.artifacts ?? []);
-  } catch (e) {
-    console.error("History loading failed:", e);
   }
-}
 
-useEffect(() => {
-  void loadSavedHistory();
-}, []);
+  useEffect(() => {
+    void loadSavedHistory();
+  }, []);
 
-async function openSavedConversation(id: string) {
-  setLoading(true);
-  setError("");
+  async function openSavedConversation(id: string) {
+    setLoading(true);
+    setError("");
 
-  try {
-    const response = await fetch(
-      `http://127.0.0.1:8000/api/conversations/${encodeURIComponent(id)}`
-    );
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/conversations/${encodeURIComponent(id)}`
+      );
 
-    const data = await response.json();
+      const data = await response.json();
 
-    if (!response.ok) {
-      throw new Error(data.detail || "Could not open conversation.");
+      if (!response.ok) {
+        throw new Error(data.detail || "Could not open conversation.");
+      }
+
+      setSessionId(data.id);
+      setMessages(
+        data.messages.map(
+          (message: {
+            role: "user" | "assistant";
+            content: string;
+          }) => ({
+            role: message.role,
+            content: message.content,
+          })
+        )
+      );
+      setMode("chat");
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Could not open conversation."
+      );
+    } finally {
+      setLoading(false);
     }
-
-    setSessionId(data.id);
-    setMessages(
-      data.messages.map((message: {
-        role: "user" | "assistant";
-        content: string;
-      }) => ({
-        role: message.role,
-        content: message.content,
-      }))
-    );
-    setMode("chat");
-  } catch (e) {
-    setError(e instanceof Error ? e.message : "Could not open conversation.");
-  } finally {
-    setLoading(false);
   }
-}
 
-function openSavedArtifact(artifact: SavedArtifact) {
-  setEssay({
-    title: artifact.title,
-    markdown: artifact.content,
-    provider: artifact.provider,
-    timestamp: artifact.created_at,
-  });
-  setMode("essay");
-  setError("");
-}
-
+  function openSavedArtifact(artifact: SavedArtifact) {
+    setEssay({
+      title: artifact.title,
+      markdown: artifact.content,
+      provider: artifact.provider,
+      timestamp: artifact.created_at,
+    });
+    setMode("essay");
+    setError("");
+  }
 
   async function copyEssay() {
     if (!essay) return;
@@ -257,7 +275,9 @@ function openSavedArtifact(artifact: SavedArtifact) {
       setError("");
       window.alert("Essay Markdown copied to clipboard.");
     } catch {
-      setError("Clipboard access failed. Select and copy the Markdown manually.");
+      setError(
+        "Clipboard access failed. Select and copy the Markdown manually."
+      );
     }
   }
 
@@ -277,12 +297,12 @@ function openSavedArtifact(artifact: SavedArtifact) {
     URL.revokeObjectURL(url);
   }
 
-function newConversation() {
-  setSessionId(crypto.randomUUID());
-  setMessages([]);
-  setQuestion("");
-  setError("");
-}
+  function newConversation() {
+    setSessionId(crypto.randomUUID());
+    setMessages([]);
+    setQuestion("");
+    setError("");
+  }
 
   return (
     <main
@@ -294,21 +314,20 @@ function newConversation() {
         fontFamily: "Arial, sans-serif",
       }}
     >
-
-    <aside
-         style={{
-              width: sidebarCollapsed ? 0 : sidebarWidth,
-              minWidth: sidebarCollapsed ? 0 : sidebarWidth,
-              flexBasis: sidebarCollapsed ? 0 : 280,
-              flexShrink: 0,
-              padding: sidebarCollapsed ? 0 : 24,
-              background: "#e9eee6",
-              boxSizing: "border-box",
-              overflow: "hidden",
-              transition: "width 0.25s ease, min-width 0.25s ease, padding 0.25s ease",
+      <aside
+        style={{
+          width: sidebarCollapsed ? 0 : sidebarWidth,
+          minWidth: sidebarCollapsed ? 0 : sidebarWidth,
+          flexBasis: sidebarCollapsed ? 0 : 280,
+          flexShrink: 0,
+          padding: sidebarCollapsed ? 0 : 24,
+          background: "#e9eee6",
+          boxSizing: "border-box",
+          overflow: "hidden",
+          transition:
+            "width 0.25s ease, min-width 0.25s ease, padding 0.25s ease",
         }}
       >
-
         <div
           style={{
             background: "#42684d",
@@ -374,81 +393,136 @@ function newConversation() {
           + New conversation
         </button>
 
+        <div style={{ marginTop: 24 }}>
+          <h3 style={{ fontSize: 14 }}>Recent conversations</h3>
 
-<div style={{ marginTop: 24 }}>
-  <h3 style={{ fontSize: 14 }}>Recent conversations</h3>
+          {historyLoading ? (
+            <p
+              role="status"
+              style={{
+                fontSize: 13,
+                color: "#42684d",
+                padding: "10px 0",
+                lineHeight: 1.6,
+              }}
+            >
+              <span aria-hidden="true">⏳ </span>
+              Loading conversation history...
+            </p>
+          ) : historyError ? (
+            <div>
+              <p
+                role="alert"
+                style={{
+                  fontSize: 13,
+                  color: "#b42318",
+                  lineHeight: 1.6,
+                }}
+              >
+                {historyError}
+              </p>
+              <button
+                onClick={() => void loadSavedHistory()}
+                style={{
+                  ...buttonStyle,
+                  background: "white",
+                  width: "100%",
+                }}
+              >
+                Try again
+              </button>
+            </div>
+          ) : savedConversations.length === 0 ? (
+            <p style={{ fontSize: 13, color: "#737b72" }}>
+              No saved conversations yet.
+            </p>
+          ) : (
+            savedConversations.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => void openSavedConversation(item.id)}
+                disabled={loading}
+                title={item.title}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: 10,
+                  marginBottom: 6,
+                  border: "1px solid #dce2d8",
+                  borderRadius: 8,
+                  background: "white",
+                  color: "#344438",
+                  cursor: "pointer",
+                  overflowWrap: "anywhere",
+                }}
+              >
+                <span>{item.title}</span>
+                <span
+                  style={{
+                    display: "block",
+                    fontSize: 11,
+                    color: "#737b72",
+                  }}
+                >
+                  {item.message_count} messages
+                </span>
+              </button>
+            ))
+          )}
 
-  {savedConversations.length === 0 ? (
-    <p style={{ fontSize: 13, color: "#737b72" }}>
-      No saved conversations yet.
-    </p>
-  ) : (
-    savedConversations.map((item) => (
-      <button
-        key={item.id}
-        onClick={() => void openSavedConversation(item.id)}
-        disabled={loading}
-        title={item.title}
-        style={{
-          display: "block",
-          width: "100%",
-          textAlign: "left",
-          padding: 10,
-          marginBottom: 6,
-          border: "1px solid #dce2d8",
-          borderRadius: 8,
-          background: "white",
-          color: "#344438",
-          cursor: "pointer",
-          overflowWrap: "anywhere",
-        }}
-      >
-        <span>{item.title}</span>
-        <span style={{ display: "block", fontSize: 11, color: "#737b72" }}>
-          {item.message_count} messages
-        </span>
-      </button>
-    ))
-  )}
+          <h3 style={{ fontSize: 14, marginTop: 24 }}>Saved essays</h3>
 
-  <h3 style={{ fontSize: 14, marginTop: 24 }}>Saved essays</h3>
+          {historyLoading ? (
+            <p style={{ fontSize: 13, color: "#737b72" }}>
+              Loading saved essays...
+            </p>
+          ) : historyError ? (
+            <p style={{ fontSize: 13, color: "#737b72" }}>
+              Essays could not be loaded.
+            </p>
+          ) : savedArtifacts.length === 0 ? (
+            <p style={{ fontSize: 13, color: "#737b72" }}>
+              No saved essays yet.
+            </p>
+          ) : (
+            savedArtifacts.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => openSavedArtifact(item)}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: 10,
+                  marginBottom: 6,
+                  border: "1px solid #dce2d8",
+                  borderRadius: 8,
+                  background: "white",
+                  color: "#344438",
+                  cursor: "pointer",
+                  overflowWrap: "anywhere",
+                }}
+              >
+                {item.title}
+              </button>
+            ))
+          )}
 
-  {savedArtifacts.length === 0 ? (
-    <p style={{ fontSize: 13, color: "#737b72" }}>
-      No saved essays yet.
-    </p>
-  ) : (
-    savedArtifacts.map((item) => (
-      <button
-        key={item.id}
-        onClick={() => openSavedArtifact(item)}
-        style={{
-          display: "block",
-          width: "100%",
-          textAlign: "left",
-          padding: 10,
-          marginBottom: 6,
-          border: "1px solid #dce2d8",
-          borderRadius: 8,
-          background: "white",
-          color: "#344438",
-          cursor: "pointer",
-          overflowWrap: "anywhere",
-        }}
-      >
-        {item.title}
-      </button>
-    ))
-  )}
-
-  <button
-    onClick={() => void loadSavedHistory()}
-    style={{ ...buttonStyle, marginTop: 8, background: "white", width: "100%" }}
-  >
-    Refresh history
-  </button>
-</div>
-
+          <button
+            onClick={() => void loadSavedHistory()}
+            disabled={historyLoading}
+            style={{
+              ...buttonStyle,
+              marginTop: 8,
+              background: "white",
+              width: "100%",
+              opacity: historyLoading ? 0.6 : 1,
+            }}
+          >
+            {historyLoading ? "Refreshing..." : "Refresh history"}
+          </button>
+        </div>
 
         <div
           style={{
@@ -494,65 +568,62 @@ function newConversation() {
         </p>
       </aside>
 
+      <button
+        type="button"
+        onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+        aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        style={{
+          position: "fixed",
+          top: 18,
+          left: sidebarCollapsed ? 12 : Math.max(8, sidebarWidth - 20),
+          zIndex: 20,
+          width: 36,
+          height: 36,
+          border: "1px solid #dce2d8",
+          borderRadius: 8,
+          background: "#ffffff",
+          color: "#344438",
+          cursor: "pointer",
+          fontSize: 20,
+          transition: "left 0.25s ease",
+        }}
+      >
+        {sidebarCollapsed ? "☰" : "‹"}
+      </button>
 
-<button
-  type="button"
-  onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
-  aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-  title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-  style={{
-    position: "fixed",
-    top: 18,
-    left: sidebarCollapsed ? 12 : Math.max(8, sidebarWidth - 20),
-    zIndex: 20,
-    width: 36,
-    height: 36,
-    border: "1px solid #dce2d8",
-    borderRadius: 8,
-    background: "#ffffff",
-    color: "#344438",
-    cursor: "pointer",
-    fontSize: 20,
-    transition: "left 0.25s ease",
-  }}
->
-  {sidebarCollapsed ? "☰" : "‹"}
-</button>
-
-
-{!sidebarCollapsed && (
-  <div
-    role="separator"
-    aria-label="Resize sidebar"
-    aria-orientation="vertical"
-    title="Drag to resize sidebar"
-    onPointerDown={(event) => {
-      event.preventDefault();
-      setIsResizing(true);
-      event.currentTarget.setPointerCapture(event.pointerId);
-    }}
-    onPointerMove={(event) => {
-      if (!isResizing) return;
-      const newWidth = event.clientX;
-      setSidebarWidth(Math.min(420, Math.max(200, newWidth)));
-    }}
-    onPointerUp={() => setIsResizing(false)}
-    onPointerCancel={() => setIsResizing(false)}
-    style={{
-      position: "fixed",
-      top: 0,
-      bottom: 0,
-      left: sidebarWidth - 3,
-      width: 6,
-      zIndex: 15,
-      cursor: "col-resize",
-      color: "#000000",
-      touchAction: "none",
-      background: isResizing ? "#42684d" : "transparent",
-    }}
-  />
-)}
-
+      {!sidebarCollapsed && (
+        <div
+          role="separator"
+          aria-label="Resize sidebar"
+          aria-orientation="vertical"
+          title="Drag to resize sidebar"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            setIsResizing(true);
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            if (!isResizing) return;
+            const newWidth = event.clientX;
+            setSidebarWidth(Math.min(420, Math.max(200, newWidth)));
+          }}
+          onPointerUp={() => setIsResizing(false)}
+          onPointerCancel={() => setIsResizing(false)}
+          style={{
+            position: "fixed",
+            top: 0,
+            bottom: 0,
+            left: sidebarWidth - 3,
+            width: 6,
+            zIndex: 15,
+            cursor: "col-resize",
+            color: "#000000",
+            touchAction: "none",
+            background: isResizing ? "#42684d" : "transparent",
+          }}
+        />
+      )}
 
       <section
         style={{
@@ -600,7 +671,9 @@ function newConversation() {
             <div style={{ flex: 1, padding: "20px 0" }}>
               {messages.length === 0 && (
                 <>
-                  <h2 style={{ fontSize: 30 }}>What are you working on?</h2>
+                  <h2 style={{ fontSize: 30 }}>
+                    What are you working on?
+                  </h2>
                   <p style={{ color: "#737b72", lineHeight: 1.7 }}>
                     Ask about startup growth, product strategy, retention, or
                     experimentation. Choose your AI provider in the sidebar.
@@ -677,30 +750,28 @@ function newConversation() {
                           color: "#42684d",
                         }}
                       >
-                       
-                      <strong>Sources</strong>
-                     <ul style={{ paddingLeft: 20 }}>
+                        <strong>Sources</strong>
+                        <ul style={{ paddingLeft: 20 }}>
                           {Array.from(
-                                 new Map(
-                                      message.sources.map((source) => [
-                                            source.source,
-                                            source,
-                                      ])
-                                 ).values()
-                           ).map((source) => (
-                               <li key={source.source}>
-                                     {source.episode} · {source.source}
-                               </li>
-                           ))}
-                      </ul>
-
+                            new Map(
+                              message.sources.map((source) => [
+                                source.source,
+                                source,
+                              ])
+                            ).values()
+                          ).map((source) => (
+                            <li key={source.source}>
+                              {source.episode} · {source.source}
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     )}
                 </article>
               ))}
 
               {loading && (
-                <p style={{ color: "#42684d" }}>
+                <p style={{ color: "#42684d" }} role="status">
                   Thinking with{" "}
                   {provider === "ollama" ? "local Ollama" : "OpenAI"}...
                 </p>
@@ -824,16 +895,19 @@ function newConversation() {
                     background: "#42684d",
                     color: "white",
                     border: 0,
-                    opacity: loading || topic.trim().length < 3 ? 0.6 : 1,
+                    opacity:
+                      loading || topic.trim().length < 3 ? 0.6 : 1,
                   }}
                 >
-                  {loading ? "Writing essay... this may take a minute" : "Generate essay"}
+                  {loading
+                    ? "Writing essay... this may take a minute"
+                    : "Generate essay"}
                 </button>
               </div>
             </form>
 
             {loading && (
-              <p style={{ color: "#42684d" }}>
+              <p style={{ color: "#42684d" }} role="status">
                 Ollama is drafting your essay. Long responses can take a little
                 while.
               </p>
@@ -853,14 +927,23 @@ function newConversation() {
                 >
                   <div>
                     <strong>{essay.title}</strong>
-                    <p style={{ color: "#737b72", fontSize: 12, margin: "5px 0" }}>
+                    <p
+                      style={{
+                        color: "#737b72",
+                        fontSize: 12,
+                        margin: "5px 0",
+                      }}
+                    >
                       Generated by {essay.provider} ·{" "}
                       {new Date(essay.timestamp).toLocaleString()}
                     </p>
                   </div>
 
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button onClick={() => void copyEssay()} style={buttonStyle}>
+                    <button
+                      onClick={() => void copyEssay()}
+                      style={buttonStyle}
+                    >
                       Copy Markdown
                     </button>
                     <button onClick={downloadEssay} style={buttonStyle}>
