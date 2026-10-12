@@ -1,4 +1,4 @@
-
+﻿
 import os
 import logging
 from datetime import datetime, timezone
@@ -25,6 +25,7 @@ logger = logging.getLogger("lenny-assistant")
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
+OLLAMA_PROXY_TOKEN = os.getenv("OLLAMA_PROXY_TOKEN", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 
@@ -279,6 +280,7 @@ async def chat(request: ChatRequest):
 
                 response = await client.post(
                     f"{OLLAMA_URL.rstrip('/')}/api/generate",
+                    headers={"Authorization": f"Bearer {OLLAMA_PROXY_TOKEN}"},
                     json={
                         "model": OLLAMA_MODEL,
                         "prompt": prompt,
@@ -451,6 +453,7 @@ Finish with a clearly labeled "Actionable Takeaway" section.
             else:
                 response = await client.post(
                     f"{OLLAMA_URL.rstrip('/')}/api/generate",
+                    headers={"Authorization": f"Bearer {OLLAMA_PROXY_TOKEN}"},
                     json={
                         "model": OLLAMA_MODEL,
                         "prompt": instructions + "\n\nWrite the essay now:",
@@ -623,3 +626,4 @@ async def list_artifacts():
         )
     finally:
         db.close()
+
