@@ -1,22 +1,51 @@
 
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import (
-    create_engine, DateTime, ForeignKey, Integer, String, Text
+    create_engine,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
 )
 from sqlalchemy.orm import (
-    DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
+    DeclarativeBase,
+    Mapped,
+    mapped_column,
+    relationship,
+    sessionmaker,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT / ".env")
+
+# Keep SQLite as the default for local development.
 DATABASE_PATH = ROOT / "data" / "lenny_assistant.db"
 DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-engine = create_engine(
-    f"sqlite:///{DATABASE_PATH.as_posix()}",
-    connect_args={"check_same_thread": False},
-)
+database_url = os.getenv("DATABASE_URL", "").strip()
+
+if database_url:
+    # Support common PostgreSQL URLs with the installed psycopg driver.
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace(
+            "postgres://", "postgresql+psycopg://", 1
+        )
+    elif database_url.startswith("postgresql://"):
+        database_url = database_url.replace(
+            "postgresql://", "postgresql+psycopg://", 1
+        )
+
+    engine = create_engine(database_url, pool_pre_ping=True)
+else:
+    engine = create_engine(
+        f"sqlite:///{DATABASE_PATH.as_posix()}",
+        connect_args={"check_same_thread": False},
+    )
 
 SessionLocal = sessionmaker(
     bind=engine,
@@ -81,7 +110,9 @@ class GeneratedArtifact(Base):
     )
     title: Mapped[str] = mapped_column(String(500))
     content: Mapped[str] = mapped_column(Text)
-    artifact_type: Mapped[str] = mapped_column(String(50), default="markdown")
+    artifact_type: Mapped[str] = mapped_column(
+        String(50), default="markdown"
+    )
     provider: Mapped[str] = mapped_column(String(100), default="unknown")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
