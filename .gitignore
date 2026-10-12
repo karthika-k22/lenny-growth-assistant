@@ -1,0 +1,29 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Local database and generated index
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/transcript_index.json
+
+# Environment and editor files
+.vscode/
+.idea/
+
+# Logs
+*.log
+data/transcripts/
