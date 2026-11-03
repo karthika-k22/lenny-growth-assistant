@@ -1,52 +1,150 @@
-﻿
-"use client";
+﻿"use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
+const WELCOME_MESSAGE =
+  "Hi! I'm Lenny's Growth Assistant. Ask me about product growth, retention, activation, experimentation, or startup strategy.";
+
 type Message = {
   role: "user" | "assistant";
   content: string;
-  sources?: string[];
+  sources?: Array<string | { source?: string; episode?: string }>;
 };
 
 type Conversation = {
+  id: string;
   session_id: string;
   title?: string;
   created_at?: string;
   updated_at?: string;
+  message_count?: number;
 };
 
 type Artifact = {
   id?: number;
+  conversation_id?: string;
   title?: string;
   content?: string;
+  type?: string;
   artifact_type?: string;
+  provider?: string;
   created_at?: string;
 };
 
-const buttonStyle: React.CSSProperties = {
-  padding: "9px 12px",
-  borderRadius: 8,
-  border: "1px solid #333",
-  background: "#181818",
-  color: "#f4f4f5",
-  cursor: "pointer",
-  fontSize: 13,
+const newSessionId = () => {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
+
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    minHeight: "100vh",
+    display: "flex",
+    background: "#07110d",
+    color: "#e8f3ec",
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif",
+  },
+  sidebar: {
+    width: 286,
+    flexShrink: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: 20,
+    padding: 20,
+    boxSizing: "border-box",
+    background: "#0a1711",
+    borderRight: "1px solid #183b29",
+    minHeight: "100vh",
+  },
+  brand: { fontSize: 20, fontWeight: 800, letterSpacing: "-0.5px" },
+  muted: { color: "#8da99a" },
+  primaryButton: {
+    border: "1px solid #28784c",
+    background: "linear-gradient(135deg, #176b3c, #0e482b)",
+    color: "#effff4",
+    borderRadius: 10,
+    padding: "11px 14px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  secondaryButton: {
+    border: "1px solid #28513a",
+    background: "#102219",
+    color: "#dcefe3",
+    borderRadius: 9,
+    padding: "9px 12px",
+    cursor: "pointer",
+  },
+  main: {
+    minWidth: 0,
+    flex: 1,
+    minHeight: "100vh",
+    display: "flex",
+    flexDirection: "column",
+    background:
+      "radial-gradient(ellipse at 50% -25%, rgba(25,110,63,.18), transparent 55%), #07110d",
+  },
+  header: {
+    minHeight: 76,
+    padding: "14px 24px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 14,
+    flexWrap: "wrap",
+    borderBottom: "1px solid #183b29",
+    background: "rgba(8, 22, 15, .88)",
+  },
+  content: {
+    width: "100%",
+    maxWidth: 980,
+    boxSizing: "border-box",
+    margin: "0 auto",
+    padding: "28px 22px",
+    flex: 1,
+  },
+  card: {
+    border: "1px solid #1c4931",
+    borderRadius: 14,
+    background: "linear-gradient(145deg, rgba(15,35,24,.96), rgba(9,22,15,.96))",
+    padding: 18,
+    marginBottom: 16,
+    boxShadow: "0 10px 30px rgba(0,0,0,.12)",
+  },
+  input: {
+    width: "100%",
+    boxSizing: "border-box",
+    border: "1px solid #28513a",
+    borderRadius: 11,
+    background: "#0b1a12",
+    color: "#e8f3ec",
+    padding: 13,
+    fontSize: 14,
+    outlineColor: "#42bd75",
+  },
+  label: {
+    color: "#9db9a7",
+    fontSize: 11,
+    fontWeight: 800,
+    letterSpacing: "1.2px",
+    textTransform: "uppercase",
+  },
+};
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <div style={{ ...styles.label, marginBottom: 9 }}>{children}</div>;
+}
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content:
-        "Hi! I'm Lenny's Growth Assistant. Ask me about product growth, retention, activation, experimentation, or startup strategy.",
-    },
+    { role: "assistant", content: WELCOME_MESSAGE },
   ]);
-
   const [input, setInput] = useState("");
   const [provider, setProvider] = useState("ollama");
   const [model, setModel] = useState("qwen2.5:3b");
@@ -69,10 +167,14 @@ export default function Home() {
 
       if (conversationResponse.ok) {
         const data = await conversationResponse.json();
+        const items = Array.isArray(data)
+          ? data
+          : data.conversations || data.items || [];
         setConversations(
-          Array.isArray(data)
-            ? data
-            : data.conversations || data.items || [],
+          items.map((item: any) => {
+            const id = String(item.id || item.session_id || "");
+            return { ...item, id, session_id: id };
+          }).filter((item: Conversation) => item.id),
         );
       }
 
@@ -83,7 +185,7 @@ export default function Home() {
         );
       }
     } catch {
-      // History can be unavailable while the backend is offline.
+      setError("Conversation history is temporarily unavailable.");
     }
   }, []);
 
@@ -91,17 +193,27 @@ export default function Home() {
     void loadSavedHistory();
   }, [loadSavedHistory]);
 
-  async function sendMessage() {
-    const question = input.trim();
+  function startNewChat() {
+    setSessionId(newSessionId());
+    setMessages([{ role: "assistant", content: WELCOME_MESSAGE }]);
+    setInput("");
+    setError("");
+    setEssayTopic("");
+    setActiveTab("chat");
+  }
 
+  async function sendMessage(event?: FormEvent) {
+    event?.preventDefault();
+    const question = input.trim();
     if (!question || loading) return;
 
-    const updatedMessages: Message[] = [
-      ...messages,
-      { role: "user", content: question },
-    ];
+    const activeSessionId = sessionId || newSessionId();
+    setSessionId(activeSessionId);
 
-    setMessages(updatedMessages);
+    const history = messages.filter(
+      (message, index) => !(index === 0 && message.content === WELCOME_MESSAGE),
+    );
+    setMessages((current) => [...current, { role: "user", content: question }]);
     setInput("");
     setLoading(true);
     setError("");
@@ -112,73 +224,43 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: question,
-          question,
           provider,
-          model,
-          session_id: sessionId || undefined,
-          conversation_id: sessionId || undefined,
-          history: messages.map((message) => ({
-            role: message.role,
-            content: message.content,
-          })),
-          messages: updatedMessages.map((message) => ({
-            role: message.role,
-            content: message.content,
-          })),
+          session_id: activeSessionId,
+          history: history.map(({ role, content }) => ({ role, content })),
         }),
       });
 
       const data = await response.json();
-
       if (!response.ok) {
-        throw new Error(
-          data.detail || data.error || "The assistant could not answer.",
-        );
+        throw new Error(data.detail || data.error || "The assistant could not answer.");
       }
 
-      const answer =
-        data.answer ||
-        data.response ||
-        data.message ||
-        data.content ||
-        "I couldn't generate a response. Please try again.";
+      const answer = String(data.answer || data.response || data.content || "").trim();
+      if (!answer) throw new Error("The assistant returned an empty response.");
 
-      const returnedSessionId =
-        data.session_id || data.conversation_id || "";
-
-      if (returnedSessionId) setSessionId(returnedSessionId);
-
+      if (data.session_id) setSessionId(data.session_id);
       setMessages((current) => [
         ...current,
         {
           role: "assistant",
           content: answer,
-          sources: data.sources || data.citations || [],
+          sources: Array.isArray(data.sources) ? data.sources : [],
         },
       ]);
-
       await loadSavedHistory();
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Something went wrong.";
-
-      setError(message);
-      setMessages((current) => [
-        ...current,
-        {
-          role: "assistant",
-          content:
-            "I couldn't complete that request. Check that the backend is running and your selected AI provider is available.",
-        },
-      ]);
+      setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setLoading(false);
     }
   }
 
   async function generateEssay() {
-    if (!essayTopic.trim() || essayLoading) return;
+    const topic = essayTopic.trim();
+    if (!topic || essayLoading) return;
 
+    const activeSessionId = sessionId || newSessionId();
+    setSessionId(activeSessionId);
     setEssayLoading(true);
     setError("");
 
@@ -187,45 +269,35 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          topic: essayTopic.trim(),
+          topic,
           provider,
-          model,
-          session_id: sessionId || undefined,
+          session_id: activeSessionId,
         }),
       });
 
       const data = await response.json();
-
       if (!response.ok) {
-        throw new Error(
-          data.detail || data.error || "Essay generation failed.",
-        );
+        throw new Error(data.detail || data.error || "Essay generation failed.");
       }
 
-      const essay =
-        data.essay ||
-        data.content ||
-        data.response ||
-        data.artifact?.content ||
-        data.message ||
-        "No essay was returned.";
+      const essay = String(
+        data.markdown || data.essay || data.content || data.response || data.artifact?.content || "",
+      ).trim();
+
+      if (!essay) {
+        throw new Error("The essay generator returned an empty response. Please try again.");
+      }
 
       setMessages((current) => [
         ...current,
-        {
-          role: "assistant",
-          content: `# Ship 30 for 30 Essay\n\n${essay}`,
-        },
+        { role: "assistant", content: essay.startsWith("#") ? essay : `# ${data.title || topic}\n\n${essay}` },
       ]);
-
       if (data.session_id) setSessionId(data.session_id);
-
-      await loadSavedHistory();
       setActiveTab("chat");
+      setEssayTopic("");
+      await loadSavedHistory();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Essay generation failed.",
-      );
+      setError(err instanceof Error ? err.message : "Essay generation failed.");
     } finally {
       setEssayLoading(false);
     }
@@ -233,63 +305,40 @@ export default function Home() {
 
   async function openConversation(id: string) {
     setError("");
-
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/conversations/${encodeURIComponent(id)}`,
       );
-
-      if (!response.ok) {
-        throw new Error("Couldn't load this conversation.");
-      }
+      if (!response.ok) throw new Error("Couldn't load this conversation.");
 
       const data = await response.json();
       const storedMessages = data.messages || data.conversation?.messages || [];
-
       setSessionId(id);
-
-      if (storedMessages.length) {
-        setMessages(
-          storedMessages.map(
-            (message: {
-              role?: string;
-              content?: string;
-              message?: string;
-            }) => ({
-              role:
-                message.role === "user" ? "user" : "assistant",
+      setMessages(
+        storedMessages.length
+          ? storedMessages.map((message: any) => ({
+              role: message.role === "user" ? "user" : "assistant",
               content: message.content || message.message || "",
-            }),
-          ),
-        );
-      } else {
-        setMessages([
-          {
-            role: "assistant",
-            content: "This conversation has no messages to display.",
-          },
-        ]);
-      }
-
+            }))
+          : [{ role: "assistant", content: "This conversation has no messages to display." }],
+      );
       setActiveTab("chat");
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Couldn't open conversation.",
-      );
+      setError(err instanceof Error ? err.message : "Couldn't open conversation.");
     }
   }
 
-  function startNewChat() {
-    setSessionId("");
+  function openArtifact(artifact: Artifact) {
+    if (!artifact.content) return;
     setMessages([
       {
         role: "assistant",
-        content:
-          "New conversation started. What product-growth problem are we solving?",
+        content: `# ${artifact.title || "Saved essay"}\n\n${artifact.content}`,
       },
     ]);
-    setError("");
+    setSessionId(artifact.conversation_id || "");
     setActiveTab("chat");
+    setError("");
   }
 
   async function copyText(text: string) {
@@ -301,10 +350,7 @@ export default function Home() {
   }
 
   function downloadText(title: string, content: string) {
-    const blob = new Blob([content], {
-      type: "text/markdown;charset=utf-8",
-    });
-
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -315,528 +361,188 @@ export default function Home() {
     URL.revokeObjectURL(url);
   }
 
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      void sendMessage();
+    }
+  }
+
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        background: "#0b0b0c",
-        color: "#f4f4f5",
-        fontFamily: "Arial, Helvetica, sans-serif",
-      }}
-    >
+    <main style={styles.page}>
       {sidebarOpen && (
-        <aside
-          style={{
-            width: 270,
-            flexShrink: 0,
-            borderRight: "1px solid #252525",
-            padding: 18,
-            display: "flex",
-            flexDirection: "column",
-            gap: 16,
-            boxSizing: "border-box",
-          }}
-        >
+        <aside style={styles.sidebar}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 700 }}>
-              Lenny&apos;s Assistant
+            <div style={styles.brand}>
+              Lenny<span style={{ color: "#55d98a" }}>&apos;s</span> Assistant
             </div>
-            <div style={{ color: "#999", fontSize: 12, marginTop: 5 }}>
+            <div style={{ ...styles.muted, fontSize: 12, marginTop: 5 }}>
               Product growth workspace
             </div>
           </div>
 
-          <button
-            style={{ ...buttonStyle, width: "100%" }}
-            onClick={startNewChat}
-          >
+          <button style={{ ...styles.primaryButton, width: "100%" }} onClick={startNewChat}>
             + New conversation
           </button>
 
-          <div>
-            <div
-              style={{
-                color: "#999",
-                fontSize: 12,
-                marginBottom: 8,
-                textTransform: "uppercase",
-                letterSpacing: 1,
-              }}
-            >
-              Conversations
-            </div>
-
-            <div style={{ display: "grid", gap: 6 }}>
+          <section>
+            <SectionLabel>Conversations</SectionLabel>
+            <div style={{ display: "grid", gap: 7 }}>
               {conversations.length === 0 && (
-                <div style={{ color: "#777", fontSize: 12 }}>
-                  No saved conversations yet.
-                </div>
+                <div style={{ ...styles.muted, fontSize: 12 }}>No saved conversations yet.</div>
               )}
-
               {conversations.map((conversation, index) => (
                 <button
-                  key={conversation.session_id || index}
-                  onClick={() =>
-                    conversation.session_id &&
-                    void openConversation(conversation.session_id)
-                  }
+                  key={conversation.id}
+                  onClick={() => void openConversation(conversation.id)}
+                  title={conversation.title || `Conversation ${index + 1}`}
                   style={{
-                    ...buttonStyle,
+                    ...styles.secondaryButton,
                     textAlign: "left",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
-                    background:
-                      sessionId === conversation.session_id
-                        ? "#292929"
-                        : "transparent",
+                    background: sessionId === conversation.id ? "#17452c" : "#0d1d14",
+                    borderColor: sessionId === conversation.id ? "#3a9e62" : "#244632",
                   }}
                 >
-                  {conversation.title ||
-                    `Conversation ${index + 1}`}
+                  {conversation.title || `Conversation ${index + 1}`}
                 </button>
               ))}
             </div>
-          </div>
+          </section>
 
-          <div>
-            <div
-              style={{
-                color: "#999",
-                fontSize: 12,
-                marginBottom: 8,
-                textTransform: "uppercase",
-                letterSpacing: 1,
-              }}
-            >
-              Generated artifacts
+          <section>
+            <SectionLabel>Generated essays</SectionLabel>
+            <div style={{ display: "grid", gap: 7 }}>
+              {artifacts.length === 0 && (
+                <div style={{ ...styles.muted, fontSize: 12 }}>Your saved essays will appear here.</div>
+              )}
+              {artifacts.map((artifact, index) => (
+                <button
+                  key={artifact.id ?? index}
+                  onClick={() => openArtifact(artifact)}
+                  style={{ ...styles.secondaryButton, textAlign: "left", lineHeight: 1.4 }}
+                >
+                  {artifact.title || `Essay ${index + 1}`}
+                </button>
+              ))}
             </div>
+          </section>
 
-            {artifacts.length === 0 ? (
-              <div style={{ color: "#777", fontSize: 12 }}>
-                Generated essays will appear here if saved by the backend.
-              </div>
-            ) : (
-              <div style={{ display: "grid", gap: 6 }}>
-                {artifacts.map((artifact, index) => (
-                  <button
-                    key={artifact.id ?? index}
-                    style={{ ...buttonStyle, textAlign: "left" }}
-                    onClick={() => {
-                      if (artifact.content) {
-                        setMessages((current) => [
-                          ...current,
-                          {
-                            role: "assistant",
-                            content: `# ${artifact.title || "Saved artifact"}\n\n${artifact.content}`,
-                          },
-                        ]);
-                        setActiveTab("chat");
-                      }
-                    }}
-                  >
-                    {artifact.title || `Artifact ${index + 1}`}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div style={{ marginTop: "auto", color: "#777", fontSize: 11 }}>
+          <div style={{ ...styles.muted, fontSize: 11, marginTop: "auto" }}>
             Lenny Growth Assistant
           </div>
         </aside>
       )}
 
-      <section
-        style={{
-          minWidth: 0,
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          minHeight: "100vh",
-        }}
-      >
-        <header
-          style={{
-            minHeight: 64,
-            borderBottom: "1px solid #252525",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            padding: "12px 20px",
-            boxSizing: "border-box",
-            flexWrap: "wrap",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button
-              style={buttonStyle}
-              onClick={() => setSidebarOpen((open) => !open)}
-              aria-label="Toggle sidebar"
-            >
+      <section style={styles.main}>
+        <header style={styles.header}>
+          <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
+            <button style={styles.secondaryButton} onClick={() => setSidebarOpen((open) => !open)}>
               ☰
             </button>
-
             <div>
-              <div style={{ fontWeight: 700 }}>Growth Assistant</div>
-              <div style={{ color: "#888", fontSize: 12 }}>
-                Ask. Explore. Build.
-              </div>
+              <div style={{ fontWeight: 800, fontSize: 17 }}>Growth Assistant</div>
+              <div style={{ ...styles.muted, fontSize: 12 }}>Ask. Explore. Build.</div>
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <label htmlFor="provider" style={{ color: "#aaa", fontSize: 12 }}>
-              Provider
-            </label>
-
+          <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+            <label htmlFor="provider" style={styles.muted}>Provider</label>
             <select
               id="provider"
               value={provider}
               onChange={(event) => {
                 const value = event.target.value;
                 setProvider(value);
-                if (value === "ollama") setModel("qwen2.5:3b");
-                if (value === "openai") setModel("gpt-4o-mini");
+                setModel(value === "ollama" ? "qwen2.5:3b" : "gpt-4o-mini");
               }}
-              style={{
-                ...buttonStyle,
-                maxWidth: 130,
-              }}
+              style={{ ...styles.input, width: 125, padding: 9 }}
             >
               <option value="ollama">Ollama</option>
               <option value="openai">OpenAI</option>
             </select>
-
-            <label htmlFor="model" style={{ color: "#aaa", fontSize: 12 }}>
-              Model
-            </label>
-
-            <input
-              id="model"
-              value={model}
-              onChange={(event) => setModel(event.target.value)}
-              style={{ ...buttonStyle, width: 125, boxSizing: "border-box" }}
-            />
+            <label htmlFor="model" style={styles.muted}>Model</label>
+            <input id="model" value={model} onChange={(event) => setModel(event.target.value)} style={{ ...styles.input, width: 145, padding: 9 }} />
           </div>
         </header>
 
-        <nav
-          style={{
-            display: "flex",
-            gap: 8,
-            padding: "12px 20px",
-            borderBottom: "1px solid #202020",
-          }}
-        >
-          <button
-            style={{
-              ...buttonStyle,
-              background: activeTab === "chat" ? "#333" : "transparent",
-            }}
-            onClick={() => setActiveTab("chat")}
-          >
-            Chat
-          </button>
-
-          <button
-            style={{
-              ...buttonStyle,
-              background: activeTab === "essay" ? "#333" : "transparent",
-            }}
-            onClick={() => setActiveTab("essay")}
-          >
-            Ship 30 for 30
-          </button>
+        <nav style={{ display: "flex", gap: 9, padding: "13px 24px", borderBottom: "1px solid #183b29" }}>
+          <button onClick={() => setActiveTab("chat")} style={{ ...styles.secondaryButton, background: activeTab === "chat" ? "#17452c" : "#0d1d14" }}>Chat</button>
+          <button onClick={() => setActiveTab("essay")} style={{ ...styles.secondaryButton, background: activeTab === "essay" ? "#17452c" : "#0d1d14" }}>Ship 30 for 30</button>
         </nav>
 
         {error && (
-          <div
-            role="alert"
-            style={{
-              margin: "12px 20px 0",
-              padding: 12,
-              border: "1px solid #743737",
-              background: "#291515",
-              borderRadius: 8,
-              color: "#ffb7b7",
-              fontSize: 13,
-            }}
-          >
+          <div role="alert" style={{ margin: "14px 22px 0", padding: 12, border: "1px solid #9b4848", background: "#2b1717", borderRadius: 10, color: "#ffcaca" }}>
             {error}
-            <button
-              onClick={() => setError("")}
-              style={{
-                ...buttonStyle,
-                float: "right",
-                padding: "2px 8px",
-              }}
-            >
-              Dismiss
-            </button>
+            <button onClick={() => setError("")} style={{ ...styles.secondaryButton, float: "right", padding: "3px 8px" }}>Dismiss</button>
           </div>
         )}
 
         {activeTab === "chat" ? (
           <>
-            <div
-              style={{
-                flex: 1,
-                width: "100%",
-                maxWidth: 900,
-                boxSizing: "border-box",
-                margin: "0 auto",
-                padding: "24px 20px",
-              }}
-            >
+            <div style={styles.content}>
               {messages.map((message, index) => (
-                <article
-                  key={`${index}-${message.role}`}
-                  style={{
-                    marginBottom: 22,
-                    padding: 16,
-                    border: "1px solid #252525",
-                    borderRadius: 12,
-                    background:
-                      message.role === "user" ? "#171717" : "#101010",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontWeight: 700,
-                      fontSize: 12,
-                      color: message.role === "user" ? "#c4b5fd" : "#86efac",
-                      marginBottom: 10,
-                      textTransform: "uppercase",
-                      letterSpacing: 0.8,
-                    }}
-                  >
+                <article key={`${sessionId}-${index}-${message.role}`} style={{ ...styles.card, borderColor: message.role === "user" ? "#315a43" : "#1c4931", marginLeft: message.role === "user" ? "12%" : 0 }}>
+                  <div style={{ ...styles.label, color: message.role === "user" ? "#b8a6ff" : "#62df96", marginBottom: 10 }}>
                     {message.role === "user" ? "You" : "Lenny Assistant"}
                   </div>
-
-                  <div
-                    className="markdown-content"
-                    style={{
-                      fontSize: 14,
-                      lineHeight: 1.75,
-                      overflowWrap: "anywhere",
-                    }}
-                  >
+                  <div className="markdown-content" style={{ fontSize: 14, lineHeight: 1.75, overflowWrap: "anywhere" }}>
                     <ReactMarkdown>{message.content}</ReactMarkdown>
                   </div>
-
                   {message.sources && message.sources.length > 0 && (
-                    <div
-                      style={{
-                        marginTop: 14,
-                        borderTop: "1px solid #333",
-                        paddingTop: 10,
-                        fontSize: 12,
-                        color: "#aaa",
-                      }}
-                    >
+                    <div style={{ marginTop: 14, borderTop: "1px solid #28513a", paddingTop: 10, fontSize: 12, color: "#9db9a7" }}>
                       <strong>Sources</strong>
                       <ul>
                         {message.sources.map((source, sourceIndex) => (
-                          <li key={sourceIndex}>{source}</li>
+                          <li key={sourceIndex}>
+                            {typeof source === "string" ? source : source.source || source.episode || "Transcript"}
+                          </li>
                         ))}
                       </ul>
                     </div>
                   )}
-
                   {message.role === "assistant" && index > 0 && (
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 8,
-                        marginTop: 14,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <button
-                        style={buttonStyle}
-                        onClick={() => void copyText(message.content)}
-                      >
-                        Copy
-                      </button>
-                      <button
-                        style={buttonStyle}
-                        onClick={() =>
-                          downloadText("lenny-response", message.content)
-                        }
-                      >
-                        Download Markdown
-                      </button>
+                    <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+                      <button style={styles.secondaryButton} onClick={() => void copyText(message.content)}>Copy</button>
+                      <button style={styles.secondaryButton} onClick={() => downloadText("lenny-response", message.content)}>Download Markdown</button>
                     </div>
                   )}
                 </article>
               ))}
-
-              {loading && (
-                <div style={{ color: "#aaa", padding: 12 }}>
-                  Thinking...
-                </div>
-              )}
-
-              <div id="chat-bottom" />
+              {loading && <div style={{ color: "#9db9a7", padding: 12 }}>Lenny is thinking...</div>}
             </div>
 
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void sendMessage();
-              }}
-              style={{
-                position: "sticky",
-                bottom: 0,
-                borderTop: "1px solid #252525",
-                background: "#0b0b0c",
-                padding: 16,
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  gap: 10,
-                  maxWidth: 900,
-                  margin: "0 auto",
-                  alignItems: "flex-end",
-                }}
-              >
+            <form onSubmit={(event) => void sendMessage(event)} style={{ position: "sticky", bottom: 0, borderTop: "1px solid #183b29", background: "#08160f", padding: 16 }}>
+              <div style={{ display: "flex", gap: 10, maxWidth: 980, margin: "0 auto", alignItems: "flex-end" }}>
                 <textarea
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (
-                      event.key === "Enter" &&
-                      !event.shiftKey &&
-                      !event.nativeEvent.isComposing
-                    ) {
-                      event.preventDefault();
-                      void sendMessage();
-                    }
-                  }}
+                  onKeyDown={handleComposerKeyDown}
                   placeholder="Ask about activation, retention, growth loops..."
                   rows={2}
-                  style={{
-                    flex: 1,
-                    resize: "vertical",
-                    minHeight: 48,
-                    maxHeight: 180,
-                    padding: 12,
-                    borderRadius: 10,
-                    border: "1px solid #333",
-                    background: "#151515",
-                    color: "#f4f4f5",
-                    fontSize: 14,
-                    lineHeight: 1.5,
-                    boxSizing: "border-box",
-                  }}
+                  style={{ ...styles.input, flex: 1, resize: "vertical", minHeight: 50, maxHeight: 180, lineHeight: 1.5 }}
                 />
-
-                <button
-                  type="submit"
-                  disabled={loading || !input.trim()}
-                  style={{
-                    ...buttonStyle,
-                    padding: "13px 18px",
-                    background:
-                      loading || !input.trim() ? "#222" : "#f4f4f5",
-                    color:
-                      loading || !input.trim() ? "#888" : "#111",
-                    fontWeight: 700,
-                  }}
-                >
-                  {loading ? "..." : "Send"}
+                <button type="submit" disabled={loading || !input.trim()} style={{ ...styles.primaryButton, opacity: loading || !input.trim() ? .55 : 1 }}>
+                  {loading ? "Thinking..." : "Send"}
                 </button>
               </div>
-
-              <div
-                style={{
-                  maxWidth: 900,
-                  margin: "8px auto 0",
-                  color: "#777",
-                  fontSize: 11,
-                }}
-              >
-                Enter to send · Shift + Enter for a new line
-              </div>
+              <div style={{ maxWidth: 980, margin: "8px auto 0", ...styles.muted, fontSize: 11 }}>Enter to send · Shift + Enter for a new line</div>
             </form>
           </>
         ) : (
-          <div
-            style={{
-              width: "100%",
-              maxWidth: 800,
-              margin: "0 auto",
-              padding: 24,
-              boxSizing: "border-box",
-            }}
-          >
-            <h1 style={{ fontSize: 25, marginBottom: 8 }}>
-              Ship 30 for 30
-            </h1>
-
-            <p style={{ color: "#aaa", lineHeight: 1.6, fontSize: 14 }}>
-              Generate a structured essay about a product-growth idea. Choose
-              a specific topic, audience, or problem to make the result useful.
-            </p>
-
-            <label
-              htmlFor="essay-topic"
-              style={{
-                display: "block",
-                marginTop: 24,
-                marginBottom: 8,
-                fontSize: 13,
-                fontWeight: 700,
-              }}
-            >
-              What should the essay explore?
-            </label>
-
-            <textarea
-              id="essay-topic"
-              value={essayTopic}
-              onChange={(event) => setEssayTopic(event.target.value)}
-              placeholder="Example: How early-stage SaaS products can improve user activation..."
-              rows={5}
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                padding: 14,
-                borderRadius: 10,
-                border: "1px solid #333",
-                background: "#151515",
-                color: "#f4f4f5",
-                fontSize: 14,
-                lineHeight: 1.6,
-              }}
-            />
-
-            <button
-              disabled={essayLoading || !essayTopic.trim()}
-              onClick={() => void generateEssay()}
-              style={{
-                ...buttonStyle,
-                marginTop: 12,
-                padding: "12px 18px",
-                background:
-                  essayLoading || !essayTopic.trim() ? "#222" : "#f4f4f5",
-                color:
-                  essayLoading || !essayTopic.trim() ? "#888" : "#111",
-                fontWeight: 700,
-              }}
-            >
-              {essayLoading ? "Generating..." : "Generate essay"}
-            </button>
-
-            <p style={{ color: "#777", fontSize: 12, marginTop: 12 }}>
-              Your generated essay will appear in the Chat tab.
-            </p>
+          <div style={{ ...styles.content, maxWidth: 820 }}>
+            <div style={styles.card}>
+              <div style={{ color: "#62df96", fontWeight: 800, fontSize: 11, letterSpacing: 1.2 }}>LENNY WRITING STUDIO</div>
+              <h1 style={{ fontSize: 27, margin: "10px 0" }}>Ship 30 for 30</h1>
+              <p style={{ ...styles.muted, fontSize: 14, lineHeight: 1.65 }}>Turn a focused product-growth idea into a structured, practical essay.</p>
+              <label htmlFor="essay-topic" style={{ ...styles.label, display: "block", margin: "22px 0 9px" }}>Essay topic</label>
+              <textarea id="essay-topic" value={essayTopic} onChange={(event) => setEssayTopic(event.target.value)} placeholder="Example: How early-stage SaaS products can improve user activation..." rows={5} style={{ ...styles.input, resize: "vertical", lineHeight: 1.6 }} />
+              <button disabled={essayLoading || !essayTopic.trim()} onClick={() => void generateEssay()} style={{ ...styles.primaryButton, marginTop: 13, opacity: essayLoading || !essayTopic.trim() ? .55 : 1 }}>
+                {essayLoading ? "Writing your essay..." : "Generate essay"}
+              </button>
+            </div>
           </div>
         )}
       </section>
