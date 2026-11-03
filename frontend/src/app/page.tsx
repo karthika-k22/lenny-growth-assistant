@@ -149,6 +149,7 @@ export default function Home() {
   const [provider, setProvider] = useState("ollama");
   const [model, setModel] = useState("qwen2.5:3b");
   const [loading, setLoading] = useState(false);
+  const [clearingHistory, setClearingHistory] = useState(false);
   const [error, setError] = useState("");
   const [sessionId, setSessionId] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -201,6 +202,43 @@ export default function Home() {
     setEssayTopic("");
     setActiveTab("chat");
   }
+
+async function clearHistory() {
+  const confirmed = window.confirm(
+    "This will permanently delete ALL conversations, messages, and generated essays for everyone using this app. Continue?"
+  );
+
+  if (!confirmed || clearingHistory) return;
+
+  setClearingHistory(true);
+  setError("");
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/history`, {
+      method: "DELETE",
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.detail || "Could not clear history.");
+    }
+
+    setConversations([]);
+    setArtifacts([]);
+    setSessionId(newSessionId());
+    setMessages([{ role: "assistant", content: WELCOME_MESSAGE }]);
+    setInput("");
+    setEssayTopic("");
+    setActiveTab("chat");
+
+    alert("All conversation history and generated essays have been cleared.");
+  } catch (err) {
+    setError(err instanceof Error ? err.message : "Could not clear history.");
+  } finally {
+    setClearingHistory(false);
+  }
+}
 
   async function sendMessage(event?: FormEvent) {
     event?.preventDefault();
@@ -429,6 +467,21 @@ export default function Home() {
               ))}
             </div>
           </section>
+        
+          <button
+                onClick={() => void clearHistory()}
+                disabled={clearingHistory}
+                style={{
+                     ...styles.secondaryButton,
+                     width: "100%",
+                     color: "#ffaaaa",
+                     borderColor: "#743d3d",
+                     background: "#241515",
+                     opacity: clearingHistory ? 0.6 : 1,
+                }}
+          >
+               {clearingHistory ? "Clearing history..." : "🗑 Clear all history"}
+          </button>
 
           <div style={{ ...styles.muted, fontSize: 11, marginTop: "auto" }}>
             Lenny Growth Assistant

@@ -626,4 +626,47 @@ async def list_artifacts():
         )
     finally:
         db.close()
+@app.delete("/api/history")
+async def clear_all_history():
+    """Delete all saved conversations, messages, and generated essays."""
+    db = SessionLocal()
 
+    try:
+        deleted_messages = db.query(ChatMessage).delete(
+            synchronize_session=False
+        )
+        deleted_artifacts = db.query(GeneratedArtifact).delete(
+            synchronize_session=False
+        )
+        deleted_conversations = db.query(Conversation).delete(
+            synchronize_session=False
+        )
+
+        db.commit()
+
+        logger.info(
+            "History cleared: %s messages, %s artifacts, %s conversations",
+            deleted_messages,
+            deleted_artifacts,
+            deleted_conversations,
+        )
+
+        return {
+            "status": "success",
+            "message": "All history has been cleared.",
+            "deleted": {
+                "messages": deleted_messages,
+                "artifacts": deleted_artifacts,
+                "conversations": deleted_conversations,
+            },
+        }
+
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to clear history")
+        raise HTTPException(
+            status_code=500,
+            detail="Could not clear history.",
+        )
+    finally:
+        db.close()
