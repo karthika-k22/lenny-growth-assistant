@@ -1,12 +1,13 @@
 ﻿
 import os
+import secrets
 import logging
 from datetime import datetime, timezone
 from typing import Literal
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -627,7 +628,15 @@ async def list_artifacts():
     finally:
         db.close()
 @app.delete("/api/history")
-async def clear_all_history():
+async def clear_all_history(x_admin_key: str = Header(default="")):
+    expected_key = os.getenv("HISTORY_ADMIN_KEY", "")
+
+    if not expected_key:
+         raise HTTPException(status_code=503, detail="History deletion is not configured.")
+
+    if not secrets.compare_digest(x_admin_key, expected_key):
+         raise HTTPException(status_code=403, detail="Invalid admin key.")
+
     """Delete all saved conversations, messages, and generated essays."""
     db = SessionLocal()
 
