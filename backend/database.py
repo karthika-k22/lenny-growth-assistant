@@ -68,12 +68,34 @@ SessionLocal = sessionmaker(
 class Base(DeclarativeBase):
     pass
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, index=True
+    )
+    email: Mapped[str] = mapped_column(
+        String(255), unique=True, index=True, nullable=False
+    )
+    password_hash: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    google_id: Mapped[str | None] = mapped_column(
+        String(255), unique=True, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
 
 class Conversation(Base):
     __tablename__ = "conversations"
 
     id: Mapped[str] = mapped_column(
         String(100), primary_key=True
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
     )
     title: Mapped[str] = mapped_column(
         String(300), default="New conversation"
