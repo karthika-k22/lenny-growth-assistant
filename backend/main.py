@@ -843,9 +843,12 @@ async def chat(
                             },
                             "contents": gemini_contents,
                             "generationConfig": {
-                                "maxOutputTokens": 512,
-                                "temperature": 0.5,
-                            },
+                                 "maxOutputTokens": 2048,
+                                 "temperature": 0.5,
+                                 "thinkingConfig": {
+                                      "thinkingLevel": "LOW",
+                                  },
+                             },
                         },
                     )
 
