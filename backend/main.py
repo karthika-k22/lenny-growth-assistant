@@ -167,6 +167,44 @@ def auth_response(user: User) -> dict:
     }
 
 
+def get_owned_conversation_history(
+    session_id: str,
+    user_id: int,
+) -> list[dict]:
+    """Validate conversation ownership and load trusted chat history."""
+
+    db = SessionLocal()
+
+    try:
+        conversation = db.get(Conversation, session_id)
+
+        if conversation is None:
+            return []
+
+        if conversation.user_id != user_id:
+            raise HTTPException(
+                status_code=409,
+                detail="This conversation does not belong to your account.",
+            )
+
+        messages = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.conversation_id == session_id)
+            .order_by(ChatMessage.id.desc())
+            .limit(10)
+            .all()
+        )
+
+        messages.reverse()
+
+        return [
+            {"role": message.role, "content": message.content}
+            for message in messages
+        ]
+
+    finally:
+        db.close()
+
 # ---------------------------------------------------------
 # DATABASE HELPERS
 # ---------------------------------------------------------
@@ -634,13 +672,19 @@ async def chat(
     request: ChatRequest,
     user: User | None = Depends(get_current_user),
 ):
+    if user is not None:
+        conversation = get_owned_conversation_history(
+            session_id=request.session_id,
+            user_id=user.id,
+        )
+    else:
+        conversation = [
+            {"role": item.role, "content": item.content}
+            for item in request.history[-10:]
+        ]
+
     sources = search_transcripts(request.message, top_k=4)
     instructions = build_instructions(sources)
-
-    conversation = [
-        {"role": item.role, "content": item.content}
-        for item in request.history[-10:]
-    ]
 
     timestamp = datetime.now(timezone.utc).isoformat()
 
@@ -756,6 +800,12 @@ async def generate_ship_30(
     user: User | None = Depends(get_current_user),
 ):
     """Generate an essay. Save it only for signed-in users."""
+
+    if user is not None:
+        get_owned_conversation_history(
+            session_id=request.session_id,
+            user_id=user.id,
+        )
 
     instructions = f"""
 You are an experienced essay writer creating a Ship 30 for 30-style essay.
