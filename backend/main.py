@@ -36,12 +36,12 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("lenny-assistant")
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
-OLLAMA_PROXY_TOKEN = os.getenv("OLLAMA_PROXY_TOKEN", "").strip()
-
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_MODEL = os.getenv(
+    "GROQ_MODEL",
+    "openai/gpt-oss-20b",
+).strip()
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "").strip()
 JWT_ALGORITHM = "HS256"
@@ -55,132 +55,6 @@ oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="/api/auth/login",
     auto_error=False,
 )
-
-
-# ---------------------------------------------------------
-# GEMINI RESPONSE HELPERS
-# ---------------------------------------------------------
-
-def extract_gemini_text(data: dict, task_name: str) -> str:
-    """Extract text from a Gemini response."""
-
-    prompt_feedback = data.get("promptFeedback") or {}
-    block_reason = prompt_feedback.get("blockReason")
-
-    if block_reason:
-        logger.warning(
-            "Gemini blocked the %s prompt: %s",
-            task_name,
-            block_reason,
-        )
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "Gemini could not process this request. "
-                "Please rephrase it and try again."
-            ),
-        )
-
-    candidates = data.get("candidates") or []
-
-    if not candidates:
-        logger.error(
-            "Gemini returned no candidates for %s. Response keys: %s",
-            task_name,
-            list(data.keys()),
-        )
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "Gemini did not return an answer. "
-                "Please try again."
-            ),
-        )
-
-    candidate = candidates[0]
-    finish_reason = str(candidate.get("finishReason", "")).upper()
-
-    content = candidate.get("content") or {}
-    parts = content.get("parts") or []
-
-    text_parts = []
-
-    for part in parts:
-        if not isinstance(part, dict):
-            continue
-
-        if part.get("thought") is True:
-            continue
-
-        part_text = part.get("text")
-
-        if isinstance(part_text, str) and part_text.strip():
-            text_parts.append(part_text.strip())
-
-    answer = "\n\n".join(text_parts).strip()
-
-    if finish_reason == "MAX_TOKENS":
-        logger.warning(
-            "Gemini reached the output-token limit during %s. "
-            "Partial output length: %s",
-            task_name,
-            len(answer),
-        )
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "Gemini reached its response-length limit before "
-                "finishing. Please retry with a shorter or more "
-                "focused request."
-            ),
-        )
-
-    if finish_reason in {"SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT"}:
-        logger.warning(
-            "Gemini stopped the %s response: %s",
-            task_name,
-            finish_reason,
-        )
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "Gemini could not complete this response. "
-                "Please rephrase your request."
-            ),
-        )
-
-    if not answer:
-        logger.error(
-            "Gemini returned no text for %s. Finish reason: %s",
-            task_name,
-            finish_reason or "unknown",
-        )
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "Gemini returned an empty response. "
-                "Please try again."
-            ),
-        )
-
-    return answer
-
-
-def gemini_error_message(response: httpx.Response) -> str:
-    """Extract a useful error without exposing secrets."""
-
-    try:
-        data = response.json()
-        error = data.get("error") or {}
-        message = error.get("message")
-
-        if isinstance(message, str) and message.strip():
-            return message[:500]
-
-    except (ValueError, AttributeError):
-        pass
-
-    return "No additional error information was provided."
 
 
 # ---------------------------------------------------------
@@ -453,7 +327,7 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10000)
     session_id: str = Field(default="default", min_length=1, max_length=100)
     history: list[Message] = Field(default_factory=list, max_length=20)
-    provider: Literal["ollama", "gemini"] = "ollama"
+    provider: Literal["groq"] = "groq"
 
 
 class ChatResponse(BaseModel):
@@ -470,7 +344,7 @@ class EssayRequest(BaseModel):
         default="product managers and startup founders",
         max_length=300,
     )
-    provider: Literal["ollama", "gemini"] = "ollama"
+    provider: Literal["groq"] = "groq"
     session_id: str = Field(default="default", min_length=1, max_length=100)
 
 
@@ -498,17 +372,11 @@ async def models():
     return {
         "models": [
             {
-                "provider": "ollama",
-                "model": OLLAMA_MODEL,
-                "local": True,
-                "configured": True,
-            },
-            {
-                "provider": "gemini",
-                "model": GEMINI_MODEL,
+                "provider": "groq",
+                "model": GROQ_MODEL,
                 "local": False,
-                "configured": bool(GEMINI_API_KEY),
-            },
+                "configured": bool(GROQ_API_KEY),
+            }
         ]
     }
 
@@ -766,179 +634,61 @@ async def chat(
     request: ChatRequest,
     user: User | None = Depends(get_current_user),
 ):
-    sources = search_transcripts(
-        request.message,
-        top_k=4,
-    )
-
+    sources = search_transcripts(request.message, top_k=4)
     instructions = build_instructions(sources)
 
     conversation = [
-        {
-            "role": item.role,
-            "content": item.content,
-        }
+        {"role": item.role, "content": item.content}
         for item in request.history[-10:]
     ]
 
     timestamp = datetime.now(timezone.utc).isoformat()
 
     try:
-        async with httpx.AsyncClient(timeout=180.0) as client:
-
-            # ---------------------------------------------
-            # GEMINI
-            # ---------------------------------------------
-
-            if request.provider == "gemini":
-
-                if not GEMINI_API_KEY:
-                    raise HTTPException(
-                        status_code=503,
-                        detail=(
-                            "Gemini is not configured. "
-                            "Configure GEMINI_API_KEY."
-                        ),
-                    )
-
-                gemini_contents = [
-                    {
-                        "role": (
-                            "model"
-                            if item["role"] == "assistant"
-                            else "user"
-                        ),
-                        "parts": [
-                            {"text": item["content"]}
-                        ],
-                    }
-                    for item in conversation
-                ]
-
-                gemini_contents.append(
-                    {
-                        "role": "user",
-                        "parts": [
-                            {"text": request.message}
-                        ],
-                    }
-                )
-
-                # Retry once for temporary Gemini errors.
-                for attempt in range(2):
-                    response = await client.post(
-                        (
-                            "https://generativelanguage.googleapis.com/"
-                            f"v1beta/models/{GEMINI_MODEL}:generateContent"
-                        ),
-                        headers={
-                            "x-goog-api-key": GEMINI_API_KEY,
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "systemInstruction": {
-                                "parts": [
-                                    {"text": instructions}
-                                ],
-                            },
-                            "contents": gemini_contents,
-                            "generationConfig": {
-                                 "maxOutputTokens": 2048,
-                                 "temperature": 0.5,
-                                 "thinkingConfig": {
-                                      "thinkingLevel": "LOW",
-                                  },
-                             },
-                        },
-                    )
-
-                    if response.is_success:
-                        break
-
-                    if (
-                        response.status_code in (429, 500, 502, 503, 504)
-                        and attempt == 0
-                    ):
-                        logger.warning(
-                            "Gemini temporarily unavailable. Retrying once."
-                        )
-                        await asyncio.sleep(3)
-                        continue
-
-                    break
-
-                if not response.is_success:
-                    error_message = gemini_error_message(response)
-
-                    logger.error(
-                        "Gemini chat request failed after retry check. "
-                        "HTTP %s: %s",
-                        response.status_code,
-                        error_message,
-                    )
-
-                response.raise_for_status()
-
-                data = response.json()
-
-                answer = extract_gemini_text(
-                    data,
-                    "chat",
-                )
-
-                provider_name = f"gemini/{GEMINI_MODEL}"
-
-            # ---------------------------------------------
-            # OLLAMA
-            # ---------------------------------------------
-
-            else:
-
-                history_text = "\n\n".join(
-                    f"{item['role'].capitalize()}: {item['content']}"
-                    for item in conversation
-                )
-
-                prompt = (
-                    instructions
-                    + "\n\n"
-                    + history_text
-                    + "\n\nUser: "
-                    + request.message
-                    + "\n\nAssistant:"
-                )
-
-                response = await client.post(
-                    f"{OLLAMA_URL.rstrip('/')}/api/generate",
-                    headers={
-                        "Authorization": f"Bearer {OLLAMA_PROXY_TOKEN}"
-                    },
-                    json={
-                        "model": OLLAMA_MODEL,
-                        "prompt": prompt,
-                        "stream": False,
-                        "keep_alive": "10m",
-                        "options": {
-                            "num_predict": 700,
-                        },
-                    },
-                )
-
-                response.raise_for_status()
-
-                data = response.json()
-
-                answer = (data.get("response") or "").strip()
-
-                provider_name = f"ollama/{OLLAMA_MODEL}"
-
-        if not answer:
+        if not GROQ_API_KEY:
             raise HTTPException(
-                status_code=502,
-                detail="The selected model returned an empty answer.",
+                status_code=503,
+                detail="Groq is not configured. Configure GROQ_API_KEY.",
             )
 
-        # Guest chats are deliberately never saved.
+        messages = [
+            {"role": "system", "content": instructions},
+            *conversation,
+            {"role": "user", "content": request.message},
+        ]
+
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            response = await client.post(
+                GROQ_API_URL,
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": GROQ_MODEL,
+                    "messages": messages,
+                    "temperature": 0.5,
+                    "max_completion_tokens": 2048,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        answer = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
+
+        if not isinstance(answer, str) or not answer.strip():
+            raise HTTPException(
+                status_code=502,
+                detail="Groq returned an empty answer.",
+            )
+
+        answer = answer.strip()
+        provider_name = f"groq/{GROQ_MODEL}"
+
         if user is not None:
             try:
                 save_chat_exchange(
@@ -948,14 +698,10 @@ async def chat(
                     assistant_message=answer,
                     provider=provider_name,
                 )
-
             except HTTPException:
                 raise
-
             except Exception:
-                logger.exception(
-                    "Chat succeeded but saving history failed"
-                )
+                logger.exception("Chat succeeded but saving history failed")
 
         return ChatResponse(
             answer=answer,
@@ -974,69 +720,29 @@ async def chat(
 
     except HTTPException:
         raise
-
-    except httpx.ConnectError:
-        logger.exception(
-            "Could not connect to the selected AI provider"
-        )
-
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Could not connect to the selected AI provider. "
-                "Check that the service is running and reachable."
-            ),
-        )
-
     except httpx.TimeoutException:
-        logger.exception(
-            "AI provider request timed out"
-        )
-
+        logger.exception("Groq chat request timed out")
         raise HTTPException(
             status_code=504,
             detail="The model took too long to respond. Please retry.",
         )
-
+    except httpx.ConnectError:
+        logger.exception("Could not connect to Groq")
+        raise HTTPException(
+            status_code=503,
+            detail="Could not connect to Groq. Please retry.",
+        )
     except httpx.HTTPStatusError as exc:
-        logger.error(
-            "AI provider returned HTTP %s",
-            exc.response.status_code,
-        )
-
-        if request.provider == "gemini":
-            if exc.response.status_code in (429, 500, 502, 503, 504):
-                detail = (
-                    "Gemini is temporarily experiencing high demand. "
-                    "Please try again shortly or switch to Ollama."
-                )
-            else:
-                detail = gemini_error_message(exc.response)
-
-            raise HTTPException(
-                status_code=502,
-                detail=f"Gemini API error: {detail}",
-            )
-
+        logger.error("Groq returned HTTP %s", exc.response.status_code)
         raise HTTPException(
             status_code=502,
-            detail=(
-                "The selected AI provider returned an error "
-                f"(HTTP {exc.response.status_code}). "
-                "Check its configuration."
-            ),
+            detail=f"Groq API error (HTTP {exc.response.status_code}). Check your API configuration or try again later.",
         )
-
     except (ValueError, KeyError, IndexError, TypeError):
-        logger.exception(
-            "Could not parse the model response"
-        )
-
+        logger.exception("Could not parse the Groq response")
         raise HTTPException(
             status_code=502,
-            detail=(
-                "The selected AI provider returned an invalid response."
-            ),
+            detail="Groq returned an invalid response.",
         )
 
 
@@ -1083,111 +789,49 @@ Finish with a clearly labeled "Actionable Takeaway" section.
 """
 
     try:
+        if not GROQ_API_KEY:
+            raise HTTPException(
+                status_code=503,
+                detail="Groq is not configured. Configure GROQ_API_KEY.",
+            )
+
         async with httpx.AsyncClient(timeout=240.0) as client:
-
-            # ---------------------------------------------
-            # GEMINI
-            # ---------------------------------------------
-
-            if request.provider == "gemini":
-
-                if not GEMINI_API_KEY:
-                    raise HTTPException(
-                        status_code=503,
-                        detail=(
-                            "Gemini is not configured. "
-                            "Configure GEMINI_API_KEY."
-                        ),
-                    )
-
-                response = await client.post(
-                    (
-                        "https://generativelanguage.googleapis.com/"
-                        f"v1beta/models/{GEMINI_MODEL}:generateContent"
-                    ),
-                    headers={
-                        "x-goog-api-key": GEMINI_API_KEY,
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "systemInstruction": {
-                            "parts": [
-                                {"text": instructions}
-                            ],
+            response = await client.post(
+                GROQ_API_URL,
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": GROQ_MODEL,
+                    "messages": [
+                        {"role": "system", "content": instructions},
+                        {
+                            "role": "user",
+                            "content": "Write the essay now.",
                         },
-                        "contents": [
-                            {
-                                "role": "user",
-                                "parts": [
-                                    {"text": "Write the essay now."}
-                                ],
-                            }
-                        ],
-                        "generationConfig": {
-                            "maxOutputTokens": 8192,
-                            "temperature": 0.7,
-                        },
-                    },
-                )
+                    ],
+                    "temperature": 0.7,
+                    "max_completion_tokens": 8192,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
 
-                if not response.is_success:
-                    error_message = gemini_error_message(response)
+        markdown = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
 
-                    logger.error(
-                        "Gemini essay request failed. HTTP %s: %s",
-                        response.status_code,
-                        error_message,
-                    )
-
-                response.raise_for_status()
-
-                data = response.json()
-
-                markdown = extract_gemini_text(
-                    data,
-                    "essay generation",
-                )
-
-                provider_name = f"gemini/{GEMINI_MODEL}"
-
-            # ---------------------------------------------
-            # OLLAMA
-            # ---------------------------------------------
-
-            else:
-
-                response = await client.post(
-                    f"{OLLAMA_URL.rstrip('/')}/api/generate",
-                    headers={
-                        "Authorization": f"Bearer {OLLAMA_PROXY_TOKEN}"
-                    },
-                    json={
-                        "model": OLLAMA_MODEL,
-                        "prompt": (
-                            instructions
-                            + "\n\nWrite the essay now:"
-                        ),
-                        "stream": False,
-                        "keep_alive": "10m",
-                        "options": {
-                            "num_predict": 3000,
-                        },
-                    },
-                )
-
-                response.raise_for_status()
-
-                data = response.json()
-
-                markdown = (data.get("response") or "").strip()
-
-                provider_name = f"ollama/{OLLAMA_MODEL}"
-
-        if not markdown:
+        if not isinstance(markdown, str) or not markdown.strip():
             raise HTTPException(
                 status_code=502,
-                detail="The model returned an empty essay.",
+                detail="Groq returned an empty essay.",
             )
+
+        markdown = markdown.strip()
+        provider_name = f"groq/{GROQ_MODEL}"
 
         title = next(
             (
@@ -1198,7 +842,6 @@ Finish with a clearly labeled "Actionable Takeaway" section.
             request.topic,
         )
 
-        # Guest essays are returned but never saved.
         if user is not None:
             try:
                 save_generated_artifact(
@@ -1208,14 +851,10 @@ Finish with a clearly labeled "Actionable Takeaway" section.
                     content=markdown,
                     provider=provider_name,
                 )
-
             except HTTPException:
                 raise
-
             except Exception:
-                logger.exception(
-                    "Essay generated but saving it failed"
-                )
+                logger.exception("Essay generated but saving it failed")
 
         return EssayResponse(
             title=title,
@@ -1226,56 +865,29 @@ Finish with a clearly labeled "Actionable Takeaway" section.
 
     except HTTPException:
         raise
-
     except httpx.TimeoutException:
-        logger.exception(
-            "Essay generation timed out"
-        )
-
+        logger.exception("Groq essay generation timed out")
         raise HTTPException(
             status_code=504,
             detail="Essay generation timed out. Try again.",
         )
-
     except httpx.ConnectError:
-        logger.exception(
-            "Could not connect to the selected provider"
-        )
-
+        logger.exception("Could not connect to Groq")
         raise HTTPException(
             status_code=503,
-            detail="Could not connect to the selected AI provider.",
+            detail="Could not connect to Groq.",
         )
-
     except httpx.HTTPStatusError as exc:
-        logger.error(
-            "Essay provider returned HTTP %s",
-            exc.response.status_code,
-        )
-
-        if request.provider == "gemini":
-            detail = gemini_error_message(exc.response)
-
-            raise HTTPException(
-                status_code=502,
-                detail=f"Gemini API error: {detail}",
-            )
-
+        logger.error("Groq essay request returned HTTP %s", exc.response.status_code)
         raise HTTPException(
             status_code=502,
-            detail=(
-                f"The AI provider returned HTTP {exc.response.status_code}."
-            ),
+            detail=f"Groq API error (HTTP {exc.response.status_code}). Check your API configuration or try again later.",
         )
-
     except (ValueError, KeyError, IndexError, TypeError):
-        logger.exception(
-            "Could not parse the essay response"
-        )
-
+        logger.exception("Could not parse the Groq essay response")
         raise HTTPException(
             status_code=502,
-            detail="The AI provider returned an invalid essay response.",
+            detail="Groq returned an invalid essay response.",
         )
 
 
