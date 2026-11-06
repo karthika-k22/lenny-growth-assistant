@@ -42,7 +42,7 @@ logger = logging.getLogger("lenny-assistant")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 OLLAMA_PROXY_TOKEN = os.getenv("OLLAMA_PROXY_TOKEN", "").strip()
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "").strip()
 JWT_ALGORITHM = "HS256"
@@ -310,7 +310,7 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10000)
     session_id: str = Field(default="default", min_length=1, max_length=100)
     history: list[Message] = Field(default_factory=list, max_length=20)
-    provider: Literal["ollama", "openai"] = "ollama"
+    provider: Literal["ollama", "gemini"] = "ollama"
 
 
 class ChatResponse(BaseModel):
@@ -327,7 +327,7 @@ class EssayRequest(BaseModel):
         default="product managers and startup founders",
         max_length=300,
     )
-    provider: Literal["ollama", "openai"] = "ollama"
+    provider: Literal["ollama", "gemini"] = "ollama"
     session_id: str = Field(default="default", min_length=1, max_length=100)
 
 
@@ -361,10 +361,10 @@ async def models():
                 "configured": True,
             },
             {
-                "provider": "openai",
-                "model": OPENAI_MODEL,
+                "provider": "gemini",
+                "model": GEMINI_MODEL,
                 "local": False,
-                "configured": bool(os.getenv("OPENAI_API_KEY")),
+                "configured": bool(os.getenv("GEMINI_API_KEY")),
             },
         ]
     }
@@ -598,40 +598,52 @@ async def chat(
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
-            if request.provider == "openai":
-                api_key = os.getenv("OPENAI_API_KEY")
+            if request.provider == "gemini":
+                api_key = os.getenv("GEMINI_API_KEY", "").strip()
 
                 if not api_key:
                     raise HTTPException(
                         status_code=503,
-                        detail="OpenAI is not configured. Configure OPENAI_API_KEY.",
+                        detail="Gemini is not configured. Configure GEMINI_API_KEY.",
                     )
 
+                gemini_contents = [
+                    {
+                        "role": "model" if item["role"] == "assistant" else "user",
+                        "parts": [{"text": item["content"]}],
+                    }
+                    for item in conversation
+                ]
+                gemini_contents.append(
+                    {"role": "user", "parts": [{"text": request.message}]}
+                )
+
                 response = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
                     headers={
-                        "Authorization": f"Bearer {api_key}",
+                        "x-goog-api-key": api_key,
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": OPENAI_MODEL,
-                        "messages": [
-                            {"role": "system", "content": instructions},
-                            *conversation,
-                            {"role": "user", "content": request.message},
-                        ],
-                        "max_tokens": 450,
+                        "systemInstruction": {
+                            "parts": [{"text": instructions}]
+                        },
+                        "contents": gemini_contents,
+                        "generationConfig": {"maxOutputTokens": 450},
                     },
                 )
                 response.raise_for_status()
                 data = response.json()
-                answer = (
-                    data.get("choices", [{}])[0]
-                    .get("message", {})
-                    .get("content", "")
-                    or ""
+                answer = " ".join(
+                    part.get("text", "")
+                    for part in (
+                        data.get("candidates", [{}])[0]
+                        .get("content", {})
+                        .get("parts", [])
+                    )
+                    if part.get("text")
                 ).strip()
-                provider_name = f"openai/{OPENAI_MODEL}"
+                provider_name = f"gemini/{GEMINI_MODEL}"
 
             else:
                 history_text = "\n\n".join(
@@ -778,42 +790,46 @@ Finish with a clearly labeled "Actionable Takeaway" section.
 
     try:
         async with httpx.AsyncClient(timeout=180.0) as client:
-            if request.provider == "openai":
-                api_key = os.getenv("OPENAI_API_KEY")
+            if request.provider == "gemini":
+                api_key = os.getenv("GEMINI_API_KEY", "").strip()
 
                 if not api_key:
                     raise HTTPException(
                         status_code=503,
-                        detail="OpenAI is not configured. Configure an API key.",
+                        detail="Gemini is not configured. Configure GEMINI_API_KEY.",
                     )
 
                 response = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
                     headers={
-                        "Authorization": f"Bearer {api_key}",
+                        "x-goog-api-key": api_key,
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": OPENAI_MODEL,
-                        "messages": [
-                            {"role": "system", "content": instructions},
+                        "systemInstruction": {
+                            "parts": [{"text": instructions}]
+                        },
+                        "contents": [
                             {
                                 "role": "user",
-                                "content": "Write the essay now.",
-                            },
+                                "parts": [{"text": "Write the essay now."}],
+                            }
                         ],
-                        "max_tokens": 3000,
+                        "generationConfig": {"maxOutputTokens": 3000},
                     },
                 )
                 response.raise_for_status()
                 data = response.json()
-                markdown = (
-                    data.get("choices", [{}])[0]
-                    .get("message", {})
-                    .get("content", "")
-                    or ""
+                markdown = " ".join(
+                    part.get("text", "")
+                    for part in (
+                        data.get("candidates", [{}])[0]
+                        .get("content", {})
+                        .get("parts", [])
+                    )
+                    if part.get("text")
                 ).strip()
-                provider_name = f"openai/{OPENAI_MODEL}"
+                provider_name = f"gemini/{GEMINI_MODEL}"
 
             else:
                 response = await client.post(

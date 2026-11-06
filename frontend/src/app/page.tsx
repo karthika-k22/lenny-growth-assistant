@@ -937,13 +937,13 @@ export default function Home() {
                 const value = event.target.value;
                 setProvider(value);
                 setModel(
-                  value === "ollama" ? "qwen2.5:3b" : "gpt-4o-mini",
+                  value === "ollama" ? "qwen2.5:3b" : "gemini-3.8-flash",
                 );
               }}
               style={{ ...styles.input, width: 125, padding: 9 }}
             >
               <option value="ollama">Ollama</option>
-              <option value="openai">OpenAI</option>
+              <option value="gemini">Gemini</option>
             </select>
 
             <label htmlFor="model" style={styles.muted}>
