@@ -247,6 +247,7 @@ export default function Home() {
 
   const [essayTopic, setEssayTopic] = useState("");
   const [essayLoading, setEssayLoading] = useState(false);
+  const [essayResult, setEssayResult] = useState("");
 
   const [activeTab, setActiveTab] = useState<"chat" | "essay">("chat");
 
@@ -592,7 +593,6 @@ export default function Home() {
       setAuthPassword("");
       setAuthError("");
 
-      // Guest conversations are not automatically transferred.
       startNewChat();
 
       setConversations([]);
@@ -777,7 +777,7 @@ export default function Home() {
   }
 
   // -------------------------------------------------------
-  // GENERATE ESSAY
+  // GENERATE SHIP 30 FOR 30 ESSAY
   // -------------------------------------------------------
 
   async function generateEssay() {
@@ -791,6 +791,7 @@ export default function Home() {
     setSessionId(activeSessionId);
     setEssayLoading(true);
     setError("");
+    setEssayResult("");
 
     try {
       const response = await fetch(
@@ -835,21 +836,18 @@ export default function Home() {
         );
       }
 
-      setMessages((current) => [
-        ...current,
-        {
-          role: "assistant",
-          content: essay.startsWith("#")
-            ? essay
-            : `# ${data.title || topic}\n\n${essay}`,
-        },
-      ]);
+      setEssayResult(
+        essay.startsWith("#")
+          ? essay
+          : `# ${data.title || topic}\n\n${essay}`,
+      );
+
+      setActiveTab("essay");
 
       if (data.session_id) {
         setSessionId(data.session_id);
       }
 
-      setActiveTab("chat");
       setEssayTopic("");
 
       if (token) {
@@ -937,18 +935,19 @@ export default function Home() {
   function openArtifact(artifact: Artifact) {
     if (!artifact.content) return;
 
-    setMessages([
-      {
-        role: "assistant",
-        content: `# ${artifact.title || "Saved essay"}\n\n${artifact.content}`,
-      },
-    ]);
+    const content = artifact.content.trim();
+
+    setEssayResult(
+      content.startsWith("#")
+        ? content
+        : `# ${artifact.title || "Saved essay"}\n\n${content}`,
+    );
 
     setSessionId(
       artifact.conversation_id || "",
     );
 
-    setActiveTab("chat");
+    setActiveTab("essay");
     setError("");
   }
 
@@ -1925,6 +1924,75 @@ export default function Home() {
               </button>
 
             </div>
+
+            {/* GENERATED ESSAY RESULT */}
+
+            {essayResult && (
+              <div style={styles.card}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    marginBottom: 18,
+                  }}
+                >
+                  <h2
+                    style={{
+                      margin: 0,
+                      fontSize: 20,
+                    }}
+                  >
+                    Your Generated Essay
+                  </h2>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <button
+                      style={styles.secondaryButton}
+                      onClick={() =>
+                        void copyText(essayResult)
+                      }
+                    >
+                      Copy
+                    </button>
+
+                    <button
+                      style={styles.secondaryButton}
+                      onClick={() =>
+                        downloadText(
+                          "ship-30-essay",
+                          essayResult,
+                        )
+                      }
+                    >
+                      Download Markdown
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  className="markdown-content"
+                  style={{
+                    fontSize: 14,
+                    lineHeight: 1.85,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  <ReactMarkdown>
+                    {essayResult}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            )}
+
           </div>
         )}
 
