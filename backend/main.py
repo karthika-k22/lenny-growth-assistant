@@ -629,7 +629,12 @@ async def chat(
                             "parts": [{"text": instructions}]
                         },
                         "contents": gemini_contents,
-                        "generationConfig": {"maxOutputTokens": 450},
+                        "generationConfig": {
+                            "maxOutputTokens": 2048,
+                            "thinkingConfig": {
+                                  "thinkingLevel": "LOW"
+                             },
+                         },
                     },
                 )
                 response.raise_for_status()
