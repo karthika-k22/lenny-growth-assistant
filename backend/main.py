@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Literal
 
@@ -61,13 +62,7 @@ oauth2_scheme = OAuth2PasswordBearer(
 # ---------------------------------------------------------
 
 def extract_gemini_text(data: dict, task_name: str) -> str:
-    """
-    Extract text from a Gemini response.
-
-    Do not treat a response stopped by MAX_TOKENS as a
-    complete answer. This prevents incomplete output from
-    being displayed as though generation succeeded.
-    """
+    """Extract text from a Gemini response."""
 
     prompt_feedback = data.get("promptFeedback") or {}
     block_reason = prompt_feedback.get("blockReason")
@@ -114,7 +109,6 @@ def extract_gemini_text(data: dict, task_name: str) -> str:
         if not isinstance(part, dict):
             continue
 
-        # Exclude internal reasoning parts if the API provides them.
         if part.get("thought") is True:
             continue
 
@@ -173,7 +167,7 @@ def extract_gemini_text(data: dict, task_name: str) -> str:
 
 
 def gemini_error_message(response: httpx.Response) -> str:
-    """Extract a useful error from Google's response without exposing secrets."""
+    """Extract a useful error without exposing secrets."""
 
     try:
         data = response.json()
@@ -182,6 +176,7 @@ def gemini_error_message(response: httpx.Response) -> str:
 
         if isinstance(message, str) and message.strip():
             return message[:500]
+
     except (ValueError, AttributeError):
         pass
 
@@ -718,16 +713,28 @@ async def get_me(user: User = Depends(require_user)):
 
 def build_instructions(sources: list[dict]) -> str:
     instructions = (
-        "You are The Lenny Growth Assistant. Help with product management, "
-        "startups, user growth, experimentation, and leadership. "
-        "Answer follow-up questions using conversation history. "
-        "Be practical, specific, and concise. Use Markdown headings and bullets. "
-        "Use podcast transcript excerpts when relevant. Cite transcript evidence "
-        "using the exact source filename, for example [Source: product_growth.txt]. "
-        "Never invent citations, statistics, quotes, episode details, or speaker claims. "
-        "If no excerpt supports an answer, say so briefly and distinguish general "
-        "knowledge from transcript evidence. Do not spend the whole answer explaining "
-        "that no transcript was found. Answer the user's actual question."
+        "You are The Lenny Growth Assistant. "
+        "Answer questions about product management, startups, "
+        "growth, experimentation, and leadership. "
+        "Use conversation history for follow-up questions. "
+
+        "RESPONSE STYLE: "
+        "Be concise and answer the exact question. "
+        "For simple questions and definitions, use 1-3 sentences "
+        "and aim for fewer than 50 words. "
+        "Give the direct answer first. "
+        "Do not add unnecessary headings, introductions, conclusions, "
+        "examples, lists, or background information. "
+        "Only explain further when the user asks for detail. "
+        "For complex questions, use short paragraphs and relevant bullets. "
+
+        "PODCAST SOURCES: "
+        "Use transcript excerpts when relevant. "
+        "Cite evidence using the exact source filename. "
+        "Never invent citations, statistics, quotes, or episode details. "
+        "If no transcript matches, answer using general knowledge. "
+        "Do not mention missing transcripts or add disclaimers. "
+        "Never claim general knowledge came from a podcast."
     )
 
     if sources:
@@ -737,12 +744,10 @@ def build_instructions(sources: list[dict]) -> str:
             f"Excerpt: {item['text']}"
             for item in sources
         )
-
     else:
         source_text = (
-            "No matching podcast transcript excerpts were found. "
-            "Answer using general knowledge when possible. "
-            "Do not claim that the podcast supports the answer."
+            "No matching transcript excerpts were found. "
+            "Use general knowledge without claiming podcast support."
         )
 
     return (
@@ -819,34 +824,52 @@ async def chat(
                     }
                 )
 
-                response = await client.post(
-                    (
-                        "https://generativelanguage.googleapis.com/"
-                        f"v1beta/models/{GEMINI_MODEL}:generateContent"
-                    ),
-                    headers={
-                        "x-goog-api-key": GEMINI_API_KEY,
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "systemInstruction": {
-                            "parts": [
-                                {"text": instructions}
-                            ],
+                # Retry once for temporary Gemini errors.
+                for attempt in range(2):
+                    response = await client.post(
+                        (
+                            "https://generativelanguage.googleapis.com/"
+                            f"v1beta/models/{GEMINI_MODEL}:generateContent"
+                        ),
+                        headers={
+                            "x-goog-api-key": GEMINI_API_KEY,
+                            "Content-Type": "application/json",
                         },
-                        "contents": gemini_contents,
-                        "generationConfig": {
-                            "maxOutputTokens": 4096,
-                            "temperature": 0.7,
+                        json={
+                            "systemInstruction": {
+                                "parts": [
+                                    {"text": instructions}
+                                ],
+                            },
+                            "contents": gemini_contents,
+                            "generationConfig": {
+                                "maxOutputTokens": 512,
+                                "temperature": 0.5,
+                            },
                         },
-                    },
-                )
+                    )
+
+                    if response.is_success:
+                        break
+
+                    if (
+                        response.status_code in (429, 500, 502, 503, 504)
+                        and attempt == 0
+                    ):
+                        logger.warning(
+                            "Gemini temporarily unavailable. Retrying once."
+                        )
+                        await asyncio.sleep(3)
+                        continue
+
+                    break
 
                 if not response.is_success:
                     error_message = gemini_error_message(response)
 
                     logger.error(
-                        "Gemini chat request failed. HTTP %s: %s",
+                        "Gemini chat request failed after retry check. "
+                        "HTTP %s: %s",
                         response.status_code,
                         error_message,
                     )
@@ -979,7 +1002,13 @@ async def chat(
         )
 
         if request.provider == "gemini":
-            detail = gemini_error_message(exc.response)
+            if exc.response.status_code in (429, 500, 502, 503, 504):
+                detail = (
+                    "Gemini is temporarily experiencing high demand. "
+                    "Please try again shortly or switch to Ollama."
+                )
+            else:
+                detail = gemini_error_message(exc.response)
 
             raise HTTPException(
                 status_code=502,
