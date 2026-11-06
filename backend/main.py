@@ -820,7 +820,12 @@ Finish with a clearly labeled "Actionable Takeaway" section.
                                 "parts": [{"text": "Write the essay now."}],
                             }
                         ],
-                        "generationConfig": {"maxOutputTokens": 3000},
+                        "generationConfig": {
+                                "maxOutputTokens": 8192,
+                                "thinkingConfig": {
+                                       "thinkingLevel": "LOW"
+                                },
+                          },
                     },
                 )
                 response.raise_for_status()
