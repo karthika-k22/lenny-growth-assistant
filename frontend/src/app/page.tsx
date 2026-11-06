@@ -49,13 +49,11 @@ type User = {
 };
 
 type ProviderModels = {
-  ollama: string;
-  gemini: string;
+  groq: string;
 };
 
 const DEFAULT_MODELS: ProviderModels = {
-  ollama: "qwen2.5:3b",
-  gemini: "gemini-3.6-flash",
+  groq: "openai/gpt-oss-20b",
 };
 
 const newSessionId = () => {
@@ -228,9 +226,7 @@ export default function Home() {
 
   const [input, setInput] = useState("");
 
-  const [provider, setProvider] = useState<"ollama" | "gemini">(
-    "ollama",
-  );
+  const [provider, setProvider] = useState<"groq">("groq");
 
   const [providerModels, setProviderModels] =
     useState<ProviderModels>(DEFAULT_MODELS);
@@ -271,7 +267,7 @@ export default function Home() {
   // LOAD CONFIGURED MODELS FROM THE BACKEND
   // -------------------------------------------------------
 
-  useEffect(() => {
+    useEffect(() => {
     let cancelled = false;
 
     async function loadModels() {
@@ -291,17 +287,10 @@ export default function Home() {
 
         for (const item of models) {
           if (
-            item.provider === "ollama" &&
+            item.provider === "groq" &&
             typeof item.model === "string"
           ) {
-            updatedModels.ollama = item.model;
-          }
-
-          if (
-            item.provider === "gemini" &&
-            typeof item.model === "string"
-          ) {
-            updatedModels.gemini = item.model;
+            updatedModels.groq = item.model;
           }
         }
 
@@ -1451,25 +1440,15 @@ export default function Home() {
             <select
               id="provider"
               value={provider}
-              onChange={(event) =>
-                setProvider(
-                  event.target.value as
-                    | "ollama"
-                    | "gemini",
-                )
-              }
+              onChange={() => setProvider("groq")}
               style={{
                 ...styles.input,
                 width: 125,
                 padding: 9,
               }}
             >
-              <option value="ollama">
-                Ollama
-              </option>
-
-              <option value="gemini">
-                Gemini
+              <option value="groq">
+                Groq
               </option>
             </select>
 
