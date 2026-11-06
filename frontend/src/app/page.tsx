@@ -1,5 +1,4 @@
-﻿
-"use client";
+﻿"use client";
 
 import {
   FormEvent,
@@ -49,10 +48,21 @@ type User = {
   email: string;
 };
 
+type ProviderModels = {
+  ollama: string;
+  gemini: string;
+};
+
+const DEFAULT_MODELS: ProviderModels = {
+  ollama: "qwen2.5:3b",
+  gemini: "gemini-3.6-flash",
+};
+
 const newSessionId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
   }
+
   return `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
@@ -62,8 +72,10 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     background: "#07110d",
     color: "#e8f3ec",
-    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif",
+    fontFamily:
+      "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif",
   },
+
   sidebar: {
     width: 286,
     flexShrink: 0,
@@ -76,8 +88,17 @@ const styles: Record<string, React.CSSProperties> = {
     borderRight: "1px solid #183b29",
     minHeight: "100vh",
   },
-  brand: { fontSize: 20, fontWeight: 800, letterSpacing: "-0.5px" },
-  muted: { color: "#8da99a" },
+
+  brand: {
+    fontSize: 20,
+    fontWeight: 800,
+    letterSpacing: "-0.5px",
+  },
+
+  muted: {
+    color: "#8da99a",
+  },
+
   primaryButton: {
     border: "1px solid #28784c",
     background: "linear-gradient(135deg, #176b3c, #0e482b)",
@@ -87,6 +108,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     cursor: "pointer",
   },
+
   secondaryButton: {
     border: "1px solid #28513a",
     background: "#102219",
@@ -95,6 +117,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "9px 12px",
     cursor: "pointer",
   },
+
   main: {
     minWidth: 0,
     flex: 1,
@@ -104,6 +127,7 @@ const styles: Record<string, React.CSSProperties> = {
     background:
       "radial-gradient(ellipse at 50% -25%, rgba(25,110,63,.18), transparent 55%), #07110d",
   },
+
   header: {
     minHeight: 76,
     padding: "14px 24px",
@@ -115,6 +139,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: "1px solid #183b29",
     background: "rgba(8, 22, 15, .88)",
   },
+
   content: {
     width: "100%",
     maxWidth: 980,
@@ -123,14 +148,17 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "28px 22px",
     flex: 1,
   },
+
   card: {
     border: "1px solid #1c4931",
     borderRadius: 14,
-    background: "linear-gradient(145deg, rgba(15,35,24,.96), rgba(9,22,15,.96))",
+    background:
+      "linear-gradient(145deg, rgba(15,35,24,.96), rgba(9,22,15,.96))",
     padding: 18,
     marginBottom: 16,
     boxShadow: "0 10px 30px rgba(0,0,0,.12)",
   },
+
   input: {
     width: "100%",
     boxSizing: "border-box",
@@ -142,6 +170,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 14,
     outlineColor: "#42bd75",
   },
+
   label: {
     color: "#9db9a7",
     fontSize: 11,
@@ -149,6 +178,7 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: "1.2px",
     textTransform: "uppercase",
   },
+
   overlay: {
     position: "fixed",
     inset: 0,
@@ -159,6 +189,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     padding: 18,
   },
+
   modal: {
     width: "100%",
     maxWidth: 420,
@@ -170,45 +201,143 @@ const styles: Record<string, React.CSSProperties> = {
   },
 };
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <div style={{ ...styles.label, marginBottom: 9 }}>{children}</div>;
+function SectionLabel({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        ...styles.label,
+        marginBottom: 9,
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([
-    { role: "assistant", content: WELCOME_MESSAGE },
+    {
+      role: "assistant",
+      content: WELCOME_MESSAGE,
+    },
   ]);
+
   const [input, setInput] = useState("");
-  const [provider, setProvider] = useState("ollama");
-  const [model, setModel] = useState("qwen2.5:3b");
+
+  const [provider, setProvider] = useState<"ollama" | "gemini">(
+    "ollama",
+  );
+
+  const [providerModels, setProviderModels] =
+    useState<ProviderModels>(DEFAULT_MODELS);
+
   const [loading, setLoading] = useState(false);
   const [clearingHistory, setClearingHistory] = useState(false);
   const [error, setError] = useState("");
   const [sessionId, setSessionId] = useState("");
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
   const [essayTopic, setEssayTopic] = useState("");
   const [essayLoading, setEssayLoading] = useState(false);
+
   const [activeTab, setActiveTab] = useState<"chat" | "essay">("chat");
 
   const [token, setToken] = useState("");
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
+
   const [authOpen, setAuthOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authMode, setAuthMode] = useState<"login" | "register">(
+    "login",
+  );
+
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
 
+  const selectedModel = providerModels[provider];
+
+  // -------------------------------------------------------
+  // LOAD CONFIGURED MODELS FROM THE BACKEND
+  // -------------------------------------------------------
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadModels() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/models`);
+
+        if (!response.ok) {
+          throw new Error("Could not load model configuration.");
+        }
+
+        const data = await response.json();
+        const models = Array.isArray(data.models) ? data.models : [];
+
+        const updatedModels: ProviderModels = {
+          ...DEFAULT_MODELS,
+        };
+
+        for (const item of models) {
+          if (
+            item.provider === "ollama" &&
+            typeof item.model === "string"
+          ) {
+            updatedModels.ollama = item.model;
+          }
+
+          if (
+            item.provider === "gemini" &&
+            typeof item.model === "string"
+          ) {
+            updatedModels.gemini = item.model;
+          }
+        }
+
+        if (!cancelled) {
+          setProviderModels(updatedModels);
+        }
+      } catch (err) {
+        console.error("Model configuration could not be loaded:", err);
+      }
+    }
+
+    void loadModels();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // -------------------------------------------------------
+  // AUTHENTICATION HEADERS
+  // -------------------------------------------------------
+
   const authHeaders = useCallback(
     (extra: Record<string, string> = {}) => ({
       ...extra,
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token
+        ? {
+            Authorization: `Bearer ${token}`,
+          }
+        : {}),
     }),
     [token],
   );
+
+  // -------------------------------------------------------
+  // LOAD PRIVATE HISTORY
+  // -------------------------------------------------------
 
   const loadSavedHistory = useCallback(async () => {
     if (!token) {
@@ -219,18 +348,31 @@ export default function Home() {
 
     try {
       const headers = authHeaders();
-      const [conversationResponse, artifactResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/conversations`, { headers }),
-        fetch(`${API_BASE_URL}/api/artifacts`, { headers }),
+
+      const [
+        conversationResponse,
+        artifactResponse,
+      ] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/conversations`, {
+          headers,
+        }),
+
+        fetch(`${API_BASE_URL}/api/artifacts`, {
+          headers,
+        }),
       ]);
 
-      if (conversationResponse.status === 401 || artifactResponse.status === 401) {
+      if (
+        conversationResponse.status === 401 ||
+        artifactResponse.status === 401
+      ) {
         logout();
         return;
       }
 
       if (conversationResponse.ok) {
         const data = await conversationResponse.json();
+
         const items = Array.isArray(data)
           ? data
           : data.conversations || data.items || [];
@@ -238,8 +380,15 @@ export default function Home() {
         setConversations(
           items
             .map((item: any) => {
-              const id = String(item.id || item.session_id || "");
-              return { ...item, id, session_id: id };
+              const id = String(
+                item.id || item.session_id || "",
+              );
+
+              return {
+                ...item,
+                id,
+                session_id: id,
+              };
             })
             .filter((item: Conversation) => item.id),
         );
@@ -247,14 +396,23 @@ export default function Home() {
 
       if (artifactResponse.ok) {
         const data = await artifactResponse.json();
+
         setArtifacts(
-          Array.isArray(data) ? data : data.artifacts || data.items || [],
+          Array.isArray(data)
+            ? data
+            : data.artifacts || data.items || [],
         );
       }
     } catch {
-      setError("Conversation history is temporarily unavailable.");
+      setError(
+        "Conversation history is temporarily unavailable.",
+      );
     }
   }, [token, authHeaders]);
+
+  // -------------------------------------------------------
+  // RESTORE LOGIN SESSION
+  // -------------------------------------------------------
 
   useEffect(() => {
     let cancelled = false;
@@ -263,18 +421,30 @@ export default function Home() {
       const savedToken = sessionStorage.getItem(TOKEN_KEY);
 
       if (!savedToken) {
-        if (!cancelled) setAuthReady(true);
+        if (!cancelled) {
+          setAuthReady(true);
+        }
+
         return;
       }
 
       try {
-        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
-          headers: { Authorization: `Bearer ${savedToken}` },
-        });
+        const response = await fetch(
+          `${API_BASE_URL}/api/auth/me`,
+          {
+            headers: {
+              Authorization: `Bearer ${savedToken}`,
+            },
+          },
+        );
 
         if (!response.ok) {
           sessionStorage.removeItem(TOKEN_KEY);
-          if (!cancelled) setAuthReady(true);
+
+          if (!cancelled) {
+            setAuthReady(true);
+          }
+
           return;
         }
 
@@ -286,10 +456,14 @@ export default function Home() {
         }
       } catch {
         if (!cancelled) {
-          setError("Could not verify your saved login. Please check your connection.");
+          setError(
+            "Could not verify your saved login. Please check your connection.",
+          );
         }
       } finally {
-        if (!cancelled) setAuthReady(true);
+        if (!cancelled) {
+          setAuthReady(true);
+        }
       }
     }
 
@@ -306,29 +480,59 @@ export default function Home() {
     }
   }, [authReady, token, loadSavedHistory]);
 
+  // -------------------------------------------------------
+  // NEW CONVERSATION
+  // -------------------------------------------------------
+
   function startNewChat() {
     setSessionId(newSessionId());
-    setMessages([{ role: "assistant", content: WELCOME_MESSAGE }]);
+
+    setMessages([
+      {
+        role: "assistant",
+        content: WELCOME_MESSAGE,
+      },
+    ]);
+
     setInput("");
     setError("");
     setEssayTopic("");
     setActiveTab("chat");
   }
 
+  // -------------------------------------------------------
+  // LOGOUT
+  // -------------------------------------------------------
+
   function logout() {
     sessionStorage.removeItem(TOKEN_KEY);
+
     setToken("");
     setUser(null);
+
     setConversations([]);
     setArtifacts([]);
+
     setSessionId(newSessionId());
-    setMessages([{ role: "assistant", content: WELCOME_MESSAGE }]);
+
+    setMessages([
+      {
+        role: "assistant",
+        content: WELCOME_MESSAGE,
+      },
+    ]);
+
     setInput("");
     setEssayTopic("");
     setActiveTab("chat");
+
     setAuthOpen(false);
     setError("");
   }
+
+  // -------------------------------------------------------
+  // LOGIN AND REGISTRATION
+  // -------------------------------------------------------
 
   async function submitAuth(event: FormEvent) {
     event.preventDefault();
@@ -344,30 +548,45 @@ export default function Home() {
           ? "/api/auth/register"
           : "/api/auth/login";
 
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: authEmail.trim(),
-          password: authPassword,
-        }),
-      });
+      const response = await fetch(
+        `${API_BASE_URL}${endpoint}`,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+          },
+
+          body: JSON.stringify({
+            email: authEmail.trim(),
+            password: authPassword,
+          }),
+        },
+      );
 
       const data = await response.json();
 
       if (!response.ok) {
         throw new Error(
-          data.detail || "Authentication failed. Please try again.",
+          data.detail ||
+            "Authentication failed. Please try again.",
         );
       }
 
       if (!data.access_token || !data.user) {
-        throw new Error("The server returned an invalid login response.");
+        throw new Error(
+          "The server returned an invalid login response.",
+        );
       }
 
-      sessionStorage.setItem(TOKEN_KEY, data.access_token);
+      sessionStorage.setItem(
+        TOKEN_KEY,
+        data.access_token,
+      );
+
       setToken(data.access_token);
       setUser(data.user);
+
       setAuthOpen(false);
       setAuthEmail("");
       setAuthPassword("");
@@ -375,20 +594,29 @@ export default function Home() {
 
       // Guest conversations are not automatically transferred.
       startNewChat();
+
       setConversations([]);
       setArtifacts([]);
     } catch (err) {
       setAuthError(
-        err instanceof Error ? err.message : "Authentication failed.",
+        err instanceof Error
+          ? err.message
+          : "Authentication failed.",
       );
     } finally {
       setAuthLoading(false);
     }
   }
 
+  // -------------------------------------------------------
+  // CLEAR PRIVATE HISTORY
+  // -------------------------------------------------------
+
   async function clearHistory() {
     if (!user || !token) {
-      setError("Sign in to clear your saved history.");
+      setError(
+        "Sign in to clear your saved history.",
+      );
       return;
     }
 
@@ -402,124 +630,193 @@ export default function Home() {
     setError("");
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/history`, {
-        method: "DELETE",
-        headers: authHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.detail || "Could not clear your history.");
-      }
-
-      setConversations([]);
-      setArtifacts([]);
-      startNewChat();
-
-      alert("Your saved history has been cleared.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not clear history.");
-    } finally {
-      setClearingHistory(false);
-    }
-  }
-
-  async function sendMessage(event?: FormEvent) {
-    event?.preventDefault();
-
-    const question = input.trim();
-    if (!question || loading) return;
-
-    const activeSessionId = sessionId || newSessionId();
-    setSessionId(activeSessionId);
-
-    const history = messages.filter(
-      (message, index) =>
-        !(index === 0 && message.content === WELCOME_MESSAGE),
-    );
-
-    setMessages((current) => [
-      ...current,
-      { role: "user", content: question },
-    ]);
-    setInput("");
-    setLoading(true);
-    setError("");
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/chat`, {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          message: question,
-          provider,
-          model,
-          session_id: activeSessionId,
-          history: history.map(({ role, content }) => ({ role, content })),
-        }),
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/history`,
+        {
+          method: "DELETE",
+          headers: authHeaders(),
+        },
+      );
 
       const data = await response.json();
 
       if (!response.ok) {
         throw new Error(
-          data.detail || data.error || "The assistant could not answer.",
+          data.detail || "Could not clear your history.",
+        );
+      }
+
+      setConversations([]);
+      setArtifacts([]);
+
+      startNewChat();
+
+      alert("Your saved history has been cleared.");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not clear history.",
+      );
+    } finally {
+      setClearingHistory(false);
+    }
+  }
+
+  // -------------------------------------------------------
+  // SEND CHAT MESSAGE
+  // -------------------------------------------------------
+
+  async function sendMessage(event?: FormEvent) {
+    event?.preventDefault();
+
+    const question = input.trim();
+
+    if (!question || loading) return;
+
+    const activeSessionId =
+      sessionId || newSessionId();
+
+    setSessionId(activeSessionId);
+
+    const history = messages.filter(
+      (message, index) =>
+        !(
+          index === 0 &&
+          message.content === WELCOME_MESSAGE
+        ),
+    );
+
+    setMessages((current) => [
+      ...current,
+      {
+        role: "user",
+        content: question,
+      },
+    ]);
+
+    setInput("");
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/chat`,
+        {
+          method: "POST",
+
+          headers: authHeaders({
+            "Content-Type": "application/json",
+          }),
+
+          body: JSON.stringify({
+            message: question,
+            provider,
+            session_id: activeSessionId,
+
+            history: history.map(
+              ({ role, content }) => ({
+                role,
+                content,
+              }),
+            ),
+          }),
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            data.error ||
+            "The assistant could not answer.",
         );
       }
 
       const answer = String(
-        data.answer || data.response || data.content || "",
+        data.answer ||
+          data.response ||
+          data.content ||
+          "",
       ).trim();
 
       if (!answer) {
-        throw new Error("The assistant returned an empty response.");
+        throw new Error(
+          "The assistant returned an empty response.",
+        );
       }
 
-      if (data.session_id) setSessionId(data.session_id);
+      if (data.session_id) {
+        setSessionId(data.session_id);
+      }
 
       setMessages((current) => [
         ...current,
         {
           role: "assistant",
           content: answer,
-          sources: Array.isArray(data.sources) ? data.sources : [],
+          sources: Array.isArray(data.sources)
+            ? data.sources
+            : [],
         },
       ]);
 
-      if (token) await loadSavedHistory();
+      if (token) {
+        await loadSavedHistory();
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong.",
+      );
     } finally {
       setLoading(false);
     }
   }
 
+  // -------------------------------------------------------
+  // GENERATE ESSAY
+  // -------------------------------------------------------
+
   async function generateEssay() {
     const topic = essayTopic.trim();
+
     if (!topic || essayLoading) return;
 
-    const activeSessionId = sessionId || newSessionId();
+    const activeSessionId =
+      sessionId || newSessionId();
+
     setSessionId(activeSessionId);
     setEssayLoading(true);
     setError("");
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/ship-30`, {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          topic,
-          provider,
-          session_id: activeSessionId,
-        }),
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/ship-30`,
+        {
+          method: "POST",
+
+          headers: authHeaders({
+            "Content-Type": "application/json",
+          }),
+
+          body: JSON.stringify({
+            topic,
+            provider,
+            session_id: activeSessionId,
+          }),
+        },
+      );
 
       const data = await response.json();
 
       if (!response.ok) {
         throw new Error(
-          data.detail || data.error || "Essay generation failed.",
+          data.detail ||
+            data.error ||
+            "Essay generation failed.",
         );
       }
 
@@ -548,18 +845,30 @@ export default function Home() {
         },
       ]);
 
-      if (data.session_id) setSessionId(data.session_id);
+      if (data.session_id) {
+        setSessionId(data.session_id);
+      }
 
       setActiveTab("chat");
       setEssayTopic("");
 
-      if (token) await loadSavedHistory();
+      if (token) {
+        await loadSavedHistory();
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Essay generation failed.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Essay generation failed.",
+      );
     } finally {
       setEssayLoading(false);
     }
   }
+
+  // -------------------------------------------------------
+  // OPEN SAVED CONVERSATION
+  // -------------------------------------------------------
 
   async function openConversation(id: string) {
     if (!token) return;
@@ -569,28 +878,44 @@ export default function Home() {
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/conversations/${encodeURIComponent(id)}`,
-        { headers: authHeaders() },
+        {
+          headers: authHeaders(),
+        },
       );
 
       if (!response.ok) {
-        throw new Error("Couldn't load this conversation.");
+        throw new Error(
+          "Couldn't load this conversation.",
+        );
       }
 
       const data = await response.json();
-      const storedMessages = data.messages || data.conversation?.messages || [];
+
+      const storedMessages =
+        data.messages ||
+        data.conversation?.messages ||
+        [];
 
       setSessionId(id);
 
       setMessages(
         storedMessages.length
           ? storedMessages.map((message: any) => ({
-              role: message.role === "user" ? "user" : "assistant",
-              content: message.content || message.message || "",
+              role:
+                message.role === "user"
+                  ? "user"
+                  : "assistant",
+
+              content:
+                message.content ||
+                message.message ||
+                "",
             }))
           : [
               {
                 role: "assistant",
-                content: "This conversation has no messages to display.",
+                content:
+                  "This conversation has no messages to display.",
               },
             ],
       );
@@ -598,10 +923,16 @@ export default function Home() {
       setActiveTab("chat");
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Couldn't open conversation.",
+        err instanceof Error
+          ? err.message
+          : "Couldn't open conversation.",
       );
     }
   }
+
+  // -------------------------------------------------------
+  // OPEN SAVED ESSAY
+  // -------------------------------------------------------
 
   function openArtifact(artifact: Artifact) {
     if (!artifact.content) return;
@@ -613,36 +944,65 @@ export default function Home() {
       },
     ]);
 
-    setSessionId(artifact.conversation_id || "");
+    setSessionId(
+      artifact.conversation_id || "",
+    );
+
     setActiveTab("chat");
     setError("");
   }
+
+  // -------------------------------------------------------
+  // COPY RESPONSE
+  // -------------------------------------------------------
 
   async function copyText(text: string) {
     try {
       await navigator.clipboard.writeText(text);
     } catch {
-      setError("Clipboard access failed. Select the text and copy it manually.");
+      setError(
+        "Clipboard access failed. Select the text and copy it manually.",
+      );
     }
   }
 
-  function downloadText(title: string, content: string) {
-    const blob = new Blob([content], {
-      type: "text/markdown;charset=utf-8",
-    });
+  // -------------------------------------------------------
+  // DOWNLOAD MARKDOWN
+  // -------------------------------------------------------
+
+  function downloadText(
+    title: string,
+    content: string,
+  ) {
+    const blob = new Blob(
+      [content],
+      {
+        type: "text/markdown;charset=utf-8",
+      },
+    );
 
     const url = URL.createObjectURL(blob);
+
     const link = document.createElement("a");
 
     link.href = url;
-    link.download = `${title.replace(/[^a-z0-9-_]/gi, "_")}.md`;
+
+    link.download = `${title.replace(
+      /[^a-z0-9-_]/gi,
+      "_",
+    )}.md`;
 
     document.body.appendChild(link);
+
     link.click();
     link.remove();
 
     URL.revokeObjectURL(url);
   }
+
+  // -------------------------------------------------------
+  // ENTER TO SEND
+  // -------------------------------------------------------
 
   function handleComposerKeyDown(
     event: KeyboardEvent<HTMLTextAreaElement>,
@@ -657,23 +1017,51 @@ export default function Home() {
     }
   }
 
+  // -------------------------------------------------------
+  // USER INTERFACE
+  // -------------------------------------------------------
+
   return (
     <main style={styles.page}>
+
+      {/* AUTHENTICATION MODAL */}
+
       {authOpen && (
         <div style={styles.overlay}>
           <div style={styles.modal}>
-            <div style={{ ...styles.brand, marginBottom: 8 }}>
-              {authMode === "login" ? "Welcome back" : "Create your account"}
+
+            <div
+              style={{
+                ...styles.brand,
+                marginBottom: 8,
+              }}
+            >
+              {authMode === "login"
+                ? "Welcome back"
+                : "Create your account"}
             </div>
 
-            <p style={{ ...styles.muted, fontSize: 13, marginBottom: 22 }}>
+            <p
+              style={{
+                ...styles.muted,
+                fontSize: 13,
+                marginBottom: 22,
+              }}
+            >
               {authMode === "login"
                 ? "Sign in to access your private conversations and essays."
                 : "Create an account to save your conversations and essays."}
             </p>
 
-            <form onSubmit={(event) => void submitAuth(event)}>
-              <label htmlFor="auth-email" style={styles.label}>
+            <form
+              onSubmit={(event) =>
+                void submitAuth(event)
+              }
+            >
+              <label
+                htmlFor="auth-email"
+                style={styles.label}
+              >
                 Email address
               </label>
 
@@ -683,12 +1071,21 @@ export default function Home() {
                 autoComplete="email"
                 required
                 value={authEmail}
-                onChange={(event) => setAuthEmail(event.target.value)}
+                onChange={(event) =>
+                  setAuthEmail(event.target.value)
+                }
                 placeholder="you@example.com"
-                style={{ ...styles.input, marginTop: 8, marginBottom: 16 }}
+                style={{
+                  ...styles.input,
+                  marginTop: 8,
+                  marginBottom: 16,
+                }}
               />
 
-              <label htmlFor="auth-password" style={styles.label}>
+              <label
+                htmlFor="auth-password"
+                style={styles.label}
+              >
                 Password
               </label>
 
@@ -696,19 +1093,29 @@ export default function Home() {
                 id="auth-password"
                 type="password"
                 autoComplete={
-                  authMode === "login" ? "current-password" : "new-password"
+                  authMode === "login"
+                    ? "current-password"
+                    : "new-password"
                 }
-                minLength={authMode === "register" ? 8 : 1}
+                minLength={
+                  authMode === "register" ? 8 : 1
+                }
                 maxLength={128}
                 required
                 value={authPassword}
-                onChange={(event) => setAuthPassword(event.target.value)}
+                onChange={(event) =>
+                  setAuthPassword(event.target.value)
+                }
                 placeholder={
                   authMode === "register"
                     ? "At least 8 characters"
                     : "Your password"
                 }
-                style={{ ...styles.input, marginTop: 8, marginBottom: 16 }}
+                style={{
+                  ...styles.input,
+                  marginTop: 8,
+                  marginBottom: 16,
+                }}
               />
 
               {authError && (
@@ -756,10 +1163,16 @@ export default function Home() {
               {authMode === "login"
                 ? "Don't have an account?"
                 : "Already have an account?"}{" "}
+
               <button
                 type="button"
                 onClick={() => {
-                  setAuthMode(authMode === "login" ? "register" : "login");
+                  setAuthMode(
+                    authMode === "login"
+                      ? "register"
+                      : "login",
+                  );
+
                   setAuthError("");
                 }}
                 style={{
@@ -770,7 +1183,9 @@ export default function Home() {
                   fontWeight: 700,
                 }}
               >
-                {authMode === "login" ? "Sign up" : "Sign in"}
+                {authMode === "login"
+                  ? "Sign up"
+                  : "Sign in"}
               </button>
             </div>
 
@@ -788,91 +1203,157 @@ export default function Home() {
             >
               Continue as guest
             </button>
+
           </div>
         </div>
       )}
 
+      {/* SIDEBAR */}
+
       {sidebarOpen && (
         <aside style={styles.sidebar}>
+
           <div>
             <div style={styles.brand}>
-              Lenny<span style={{ color: "#55d98a" }}>&apos;s</span> Assistant
+              Lenny
+              <span style={{ color: "#55d98a" }}>
+                &apos;s
+              </span>{" "}
+              Assistant
             </div>
 
-            <div style={{ ...styles.muted, fontSize: 12, marginTop: 5 }}>
+            <div
+              style={{
+                ...styles.muted,
+                fontSize: 12,
+                marginTop: 5,
+              }}
+            >
               Product growth workspace
             </div>
           </div>
 
           <button
-            style={{ ...styles.primaryButton, width: "100%" }}
+            style={{
+              ...styles.primaryButton,
+              width: "100%",
+            }}
             onClick={startNewChat}
           >
             + New conversation
           </button>
 
-          <section>
-            <SectionLabel>Conversations</SectionLabel>
+          {/* CONVERSATIONS */}
 
-            <div style={{ display: "grid", gap: 7 }}>
+          <section>
+            <SectionLabel>
+              Conversations
+            </SectionLabel>
+
+            <div
+              style={{
+                display: "grid",
+                gap: 7,
+              }}
+            >
               {conversations.length === 0 && (
-                <div style={{ ...styles.muted, fontSize: 12 }}>
+                <div
+                  style={{
+                    ...styles.muted,
+                    fontSize: 12,
+                  }}
+                >
                   {user
                     ? "No saved conversations yet."
                     : "Sign in to save conversations."}
                 </div>
               )}
 
-              {conversations.map((conversation, index) => (
-                <button
-                  key={conversation.id}
-                  onClick={() => void openConversation(conversation.id)}
-                  title={conversation.title || `Conversation ${index + 1}`}
-                  style={{
-                    ...styles.secondaryButton,
-                    textAlign: "left",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    background:
-                      sessionId === conversation.id ? "#17452c" : "#0d1d14",
-                    borderColor:
-                      sessionId === conversation.id ? "#3a9e62" : "#244632",
-                  }}
-                >
-                  {conversation.title || `Conversation ${index + 1}`}
-                </button>
-              ))}
+              {conversations.map(
+                (conversation, index) => (
+                  <button
+                    key={conversation.id}
+                    onClick={() =>
+                      void openConversation(
+                        conversation.id,
+                      )
+                    }
+                    title={
+                      conversation.title ||
+                      `Conversation ${index + 1}`
+                    }
+                    style={{
+                      ...styles.secondaryButton,
+                      textAlign: "left",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      background:
+                        sessionId === conversation.id
+                          ? "#17452c"
+                          : "#0d1d14",
+                      borderColor:
+                        sessionId === conversation.id
+                          ? "#3a9e62"
+                          : "#244632",
+                    }}
+                  >
+                    {conversation.title ||
+                      `Conversation ${index + 1}`}
+                  </button>
+                ),
+              )}
             </div>
           </section>
 
-          <section>
-            <SectionLabel>Generated essays</SectionLabel>
+          {/* GENERATED ESSAYS */}
 
-            <div style={{ display: "grid", gap: 7 }}>
+          <section>
+            <SectionLabel>
+              Generated essays
+            </SectionLabel>
+
+            <div
+              style={{
+                display: "grid",
+                gap: 7,
+              }}
+            >
               {artifacts.length === 0 && (
-                <div style={{ ...styles.muted, fontSize: 12 }}>
+                <div
+                  style={{
+                    ...styles.muted,
+                    fontSize: 12,
+                  }}
+                >
                   {user
                     ? "Your saved essays will appear here."
                     : "Sign in to save essays."}
                 </div>
               )}
 
-              {artifacts.map((artifact, index) => (
-                <button
-                  key={artifact.id ?? index}
-                  onClick={() => openArtifact(artifact)}
-                  style={{
-                    ...styles.secondaryButton,
-                    textAlign: "left",
-                    lineHeight: 1.4,
-                  }}
-                >
-                  {artifact.title || `Essay ${index + 1}`}
-                </button>
-              ))}
+              {artifacts.map(
+                (artifact, index) => (
+                  <button
+                    key={artifact.id ?? index}
+                    onClick={() =>
+                      openArtifact(artifact)
+                    }
+                    style={{
+                      ...styles.secondaryButton,
+                      textAlign: "left",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {artifact.title ||
+                      `Essay ${index + 1}`}
+                  </button>
+                ),
+              )}
             </div>
           </section>
+
+          {/* CLEAR HISTORY */}
 
           {user && (
             <button
@@ -887,36 +1368,71 @@ export default function Home() {
                 opacity: clearingHistory ? 0.6 : 1,
               }}
             >
-              {clearingHistory ? "Clearing history..." : "🗑 Clear my history"}
+              {clearingHistory
+                ? "Clearing history..."
+                : "🗑 Clear my history"}
             </button>
           )}
 
-          <div style={{ ...styles.muted, fontSize: 11, marginTop: "auto" }}>
+          <div
+            style={{
+              ...styles.muted,
+              fontSize: 11,
+              marginTop: "auto",
+            }}
+          >
             Lenny Growth Assistant
           </div>
+
         </aside>
       )}
 
+      {/* MAIN CONTENT */}
+
       <section style={styles.main}>
+
+        {/* HEADER */}
+
         <header style={styles.header}>
-          <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 13,
+            }}
+          >
             <button
               style={styles.secondaryButton}
-              onClick={() => setSidebarOpen((open) => !open)}
+              onClick={() =>
+                setSidebarOpen((open) => !open)
+              }
             >
               ☰
             </button>
 
             <div>
-              <div style={{ fontWeight: 800, fontSize: 17 }}>
+              <div
+                style={{
+                  fontWeight: 800,
+                  fontSize: 17,
+                }}
+              >
                 Growth Assistant
               </div>
 
-              <div style={{ ...styles.muted, fontSize: 12 }}>
+              <div
+                style={{
+                  ...styles.muted,
+                  fontSize: 12,
+                }}
+              >
                 Ask. Explore. Build.
               </div>
             </div>
           </div>
+
+          {/* PROVIDER AND MODEL */}
 
           <div
             style={{
@@ -926,35 +1442,57 @@ export default function Home() {
               flexWrap: "wrap",
             }}
           >
-            <label htmlFor="provider" style={styles.muted}>
+            <label
+              htmlFor="provider"
+              style={styles.muted}
+            >
               Provider
             </label>
 
             <select
               id="provider"
               value={provider}
-              onChange={(event) => {
-                const value = event.target.value;
-                setProvider(value);
-                setModel(
-                  value === "ollama" ? "qwen2.5:3b" : "gemini-3.8-flash",
-                );
+              onChange={(event) =>
+                setProvider(
+                  event.target.value as
+                    | "ollama"
+                    | "gemini",
+                )
+              }
+              style={{
+                ...styles.input,
+                width: 125,
+                padding: 9,
               }}
-              style={{ ...styles.input, width: 125, padding: 9 }}
             >
-              <option value="ollama">Ollama</option>
-              <option value="gemini">Gemini</option>
+              <option value="ollama">
+                Ollama
+              </option>
+
+              <option value="gemini">
+                Gemini
+              </option>
             </select>
 
-            <label htmlFor="model" style={styles.muted}>
+            <label
+              htmlFor="model"
+              style={styles.muted}
+            >
               Model
             </label>
 
             <input
               id="model"
-              value={model}
-              onChange={(event) => setModel(event.target.value)}
-              style={{ ...styles.input, width: 145, padding: 9 }}
+              value={selectedModel}
+              readOnly
+              title="Model configured on the backend"
+              style={{
+                ...styles.input,
+                width: 155,
+                padding: 9,
+                opacity: 0.85,
+                cursor: "default",
+              }}
             />
 
             {user ? (
@@ -991,7 +1529,10 @@ export default function Home() {
               </button>
             )}
           </div>
+
         </header>
+
+        {/* GUEST NOTICE */}
 
         {!user && (
           <div
@@ -1005,6 +1546,7 @@ export default function Home() {
             }}
           >
             Guest mode: chat and generate essays freely.{" "}
+
             <button
               onClick={() => {
                 setAuthMode("register");
@@ -1020,9 +1562,12 @@ export default function Home() {
             >
               Create an account
             </button>{" "}
+
             to save your work.
           </div>
         )}
+
+        {/* NAVIGATION */}
 
         <nav
           style={{
@@ -1036,7 +1581,10 @@ export default function Home() {
             onClick={() => setActiveTab("chat")}
             style={{
               ...styles.secondaryButton,
-              background: activeTab === "chat" ? "#17452c" : "#0d1d14",
+              background:
+                activeTab === "chat"
+                  ? "#17452c"
+                  : "#0d1d14",
             }}
           >
             Chat
@@ -1046,12 +1594,17 @@ export default function Home() {
             onClick={() => setActiveTab("essay")}
             style={{
               ...styles.secondaryButton,
-              background: activeTab === "essay" ? "#17452c" : "#0d1d14",
+              background:
+                activeTab === "essay"
+                  ? "#17452c"
+                  : "#0d1d14",
             }}
           >
             Ship 30 for 30
           </button>
         </nav>
+
+        {/* ERROR MESSAGE */}
 
         {error && (
           <div
@@ -1080,28 +1633,41 @@ export default function Home() {
           </div>
         )}
 
+        {/* CHAT TAB */}
+
         {activeTab === "chat" ? (
           <>
+
             <div style={styles.content}>
+
               {messages.map((message, index) => (
                 <article
                   key={`${sessionId}-${index}-${message.role}`}
                   style={{
                     ...styles.card,
                     borderColor:
-                      message.role === "user" ? "#315a43" : "#1c4931",
-                    marginLeft: message.role === "user" ? "12%" : 0,
+                      message.role === "user"
+                        ? "#315a43"
+                        : "#1c4931",
+                    marginLeft:
+                      message.role === "user"
+                        ? "12%"
+                        : 0,
                   }}
                 >
                   <div
                     style={{
                       ...styles.label,
                       color:
-                        message.role === "user" ? "#b8a6ff" : "#62df96",
+                        message.role === "user"
+                          ? "#b8a6ff"
+                          : "#62df96",
                       marginBottom: 10,
                     }}
                   >
-                    {message.role === "user" ? "You" : "Lenny Assistant"}
+                    {message.role === "user"
+                      ? "You"
+                      : "Lenny Assistant"}
                   </div>
 
                   <div
@@ -1112,71 +1678,99 @@ export default function Home() {
                       overflowWrap: "anywhere",
                     }}
                   >
-                    <ReactMarkdown>{message.content}</ReactMarkdown>
+                    <ReactMarkdown>
+                      {message.content}
+                    </ReactMarkdown>
                   </div>
 
-                  {message.sources && message.sources.length > 0 && (
-                    <div
-                      style={{
-                        marginTop: 14,
-                        borderTop: "1px solid #28513a",
-                        paddingTop: 10,
-                        fontSize: 12,
-                        color: "#9db9a7",
-                      }}
-                    >
-                      <strong>Sources</strong>
+                  {/* SOURCES */}
 
-                      <ul>
-                        {message.sources.map((source, sourceIndex) => (
-                          <li key={sourceIndex}>
-                            {typeof source === "string"
-                              ? source
-                              : source.source || source.episode || "Transcript"}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {message.role === "assistant" && index > 0 && (
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 8,
-                        marginTop: 14,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <button
-                        style={styles.secondaryButton}
-                        onClick={() => void copyText(message.content)}
+                  {message.sources &&
+                    message.sources.length > 0 && (
+                      <div
+                        style={{
+                          marginTop: 14,
+                          borderTop: "1px solid #28513a",
+                          paddingTop: 10,
+                          fontSize: 12,
+                          color: "#9db9a7",
+                        }}
                       >
-                        Copy
-                      </button>
+                        <strong>Sources</strong>
 
-                      <button
-                        style={styles.secondaryButton}
-                        onClick={() =>
-                          downloadText("lenny-response", message.content)
-                        }
+                        <ul>
+                          {message.sources.map(
+                            (source, sourceIndex) => (
+                              <li key={sourceIndex}>
+                                {typeof source === "string"
+                                  ? source
+                                  : source.source ||
+                                    source.episode ||
+                                    "Transcript"}
+                              </li>
+                            ),
+                          )}
+                        </ul>
+                      </div>
+                    )}
+
+                  {/* COPY AND DOWNLOAD */}
+
+                  {message.role === "assistant" &&
+                    index > 0 && (
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          marginTop: 14,
+                          flexWrap: "wrap",
+                        }}
                       >
-                        Download Markdown
-                      </button>
-                    </div>
-                  )}
+                        <button
+                          style={styles.secondaryButton}
+                          onClick={() =>
+                            void copyText(message.content)
+                          }
+                        >
+                          Copy
+                        </button>
+
+                        <button
+                          style={styles.secondaryButton}
+                          onClick={() =>
+                            downloadText(
+                              "lenny-response",
+                              message.content,
+                            )
+                          }
+                        >
+                          Download Markdown
+                        </button>
+                      </div>
+                    )}
+
                 </article>
               ))}
 
               {loading && (
-                <div style={{ color: "#9db9a7", padding: 12 }}>
+                <div
+                  style={{
+                    color: "#9db9a7",
+                    padding: 12,
+                  }}
+                >
                   Lenny is thinking...
                 </div>
               )}
+
             </div>
 
+            {/* CHAT COMPOSER */}
+
             <form
-              onSubmit={(event) => void sendMessage(event)}
+              onSubmit={(event) =>
+                void sendMessage(event)
+              }
               style={{
                 position: "sticky",
                 bottom: 0,
@@ -1196,7 +1790,9 @@ export default function Home() {
               >
                 <textarea
                   value={input}
-                  onChange={(event) => setInput(event.target.value)}
+                  onChange={(event) =>
+                    setInput(event.target.value)
+                  }
                   onKeyDown={handleComposerKeyDown}
                   placeholder="Ask about activation, retention, growth loops..."
                   rows={2}
@@ -1215,7 +1811,10 @@ export default function Home() {
                   disabled={loading || !input.trim()}
                   style={{
                     ...styles.primaryButton,
-                    opacity: loading || !input.trim() ? 0.55 : 1,
+                    opacity:
+                      loading || !input.trim()
+                        ? 0.55
+                        : 1,
                   }}
                 >
                   {loading ? "Thinking..." : "Send"}
@@ -1233,10 +1832,20 @@ export default function Home() {
                 Enter to send · Shift + Enter for a new line
               </div>
             </form>
+
           </>
         ) : (
-          <div style={{ ...styles.content, maxWidth: 820 }}>
+
+          /* SHIP 30 FOR 30 TAB */
+
+          <div
+            style={{
+              ...styles.content,
+              maxWidth: 820,
+            }}
+          >
             <div style={styles.card}>
+
               <div
                 style={{
                   color: "#62df96",
@@ -1248,7 +1857,12 @@ export default function Home() {
                 LENNY WRITING STUDIO
               </div>
 
-              <h1 style={{ fontSize: 27, margin: "10px 0" }}>
+              <h1
+                style={{
+                  fontSize: 27,
+                  margin: "10px 0",
+                }}
+              >
                 Ship 30 for 30
               </h1>
 
@@ -1259,8 +1873,8 @@ export default function Home() {
                   lineHeight: 1.65,
                 }}
               >
-                Turn a focused product-growth idea into a structured,
-                practical essay.
+                Turn a focused product-growth idea into a
+                structured, practical essay.
               </p>
 
               <label
@@ -1277,7 +1891,9 @@ export default function Home() {
               <textarea
                 id="essay-topic"
                 value={essayTopic}
-                onChange={(event) => setEssayTopic(event.target.value)}
+                onChange={(event) =>
+                  setEssayTopic(event.target.value)
+                }
                 placeholder="Example: How early-stage SaaS products can improve user activation..."
                 rows={5}
                 style={{
@@ -1288,19 +1904,30 @@ export default function Home() {
               />
 
               <button
-                disabled={essayLoading || !essayTopic.trim()}
-                onClick={() => void generateEssay()}
+                disabled={
+                  essayLoading || !essayTopic.trim()
+                }
+                onClick={() =>
+                  void generateEssay()
+                }
                 style={{
                   ...styles.primaryButton,
                   marginTop: 13,
-                  opacity: essayLoading || !essayTopic.trim() ? 0.55 : 1,
+                  opacity:
+                    essayLoading || !essayTopic.trim()
+                      ? 0.55
+                      : 1,
                 }}
               >
-                {essayLoading ? "Writing your essay..." : "Generate essay"}
+                {essayLoading
+                  ? "Writing your essay..."
+                  : "Generate essay"}
               </button>
+
             </div>
           </div>
         )}
+
       </section>
     </main>
   );

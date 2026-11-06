@@ -1,6 +1,4 @@
-
 import os
-import secrets
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Literal
@@ -12,9 +10,7 @@ from email_validator import validate_email, EmailNotValidError
 from fastapi import (
     FastAPI,
     HTTPException,
-    Header,
     Depends,
-    status,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
@@ -42,7 +38,9 @@ logger = logging.getLogger("lenny-assistant")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 OLLAMA_PROXY_TOKEN = os.getenv("OLLAMA_PROXY_TOKEN", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "").strip()
 JWT_ALGORITHM = "HS256"
@@ -51,10 +49,143 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
 
 password_hash = PasswordHash.recommended()
+
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="/api/auth/login",
     auto_error=False,
 )
+
+
+# ---------------------------------------------------------
+# GEMINI RESPONSE HELPERS
+# ---------------------------------------------------------
+
+def extract_gemini_text(data: dict, task_name: str) -> str:
+    """
+    Extract text from a Gemini response.
+
+    Do not treat a response stopped by MAX_TOKENS as a
+    complete answer. This prevents incomplete output from
+    being displayed as though generation succeeded.
+    """
+
+    prompt_feedback = data.get("promptFeedback") or {}
+    block_reason = prompt_feedback.get("blockReason")
+
+    if block_reason:
+        logger.warning(
+            "Gemini blocked the %s prompt: %s",
+            task_name,
+            block_reason,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Gemini could not process this request. "
+                "Please rephrase it and try again."
+            ),
+        )
+
+    candidates = data.get("candidates") or []
+
+    if not candidates:
+        logger.error(
+            "Gemini returned no candidates for %s. Response keys: %s",
+            task_name,
+            list(data.keys()),
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Gemini did not return an answer. "
+                "Please try again."
+            ),
+        )
+
+    candidate = candidates[0]
+    finish_reason = str(candidate.get("finishReason", "")).upper()
+
+    content = candidate.get("content") or {}
+    parts = content.get("parts") or []
+
+    text_parts = []
+
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+
+        # Exclude internal reasoning parts if the API provides them.
+        if part.get("thought") is True:
+            continue
+
+        part_text = part.get("text")
+
+        if isinstance(part_text, str) and part_text.strip():
+            text_parts.append(part_text.strip())
+
+    answer = "\n\n".join(text_parts).strip()
+
+    if finish_reason == "MAX_TOKENS":
+        logger.warning(
+            "Gemini reached the output-token limit during %s. "
+            "Partial output length: %s",
+            task_name,
+            len(answer),
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Gemini reached its response-length limit before "
+                "finishing. Please retry with a shorter or more "
+                "focused request."
+            ),
+        )
+
+    if finish_reason in {"SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT"}:
+        logger.warning(
+            "Gemini stopped the %s response: %s",
+            task_name,
+            finish_reason,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Gemini could not complete this response. "
+                "Please rephrase your request."
+            ),
+        )
+
+    if not answer:
+        logger.error(
+            "Gemini returned no text for %s. Finish reason: %s",
+            task_name,
+            finish_reason or "unknown",
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Gemini returned an empty response. "
+                "Please try again."
+            ),
+        )
+
+    return answer
+
+
+def gemini_error_message(response: httpx.Response) -> str:
+    """Extract a useful error from Google's response without exposing secrets."""
+
+    try:
+        data = response.json()
+        error = data.get("error") or {}
+        message = error.get("message")
+
+        if isinstance(message, str) and message.strip():
+            return message[:500]
+    except (ValueError, AttributeError):
+        pass
+
+    return "No additional error information was provided."
 
 
 # ---------------------------------------------------------
@@ -69,6 +200,7 @@ def create_access_token(user_id: int) -> str:
         )
 
     now = datetime.now(timezone.utc)
+
     payload = {
         "sub": str(user_id),
         "iat": now,
@@ -103,6 +235,7 @@ def get_current_user(
             algorithms=[JWT_ALGORITHM],
         )
         user_id = int(payload["sub"])
+
     except (InvalidTokenError, KeyError, ValueError, TypeError):
         raise HTTPException(
             status_code=401,
@@ -111,14 +244,18 @@ def get_current_user(
         )
 
     db = SessionLocal()
+
     try:
         user = db.get(User, user_id)
+
         if user is None:
             raise HTTPException(
                 status_code=401,
                 detail="Account not found.",
             )
+
         return user
+
     finally:
         db.close()
 
@@ -131,13 +268,18 @@ def require_user(
             status_code=401,
             detail="Please sign in to access this feature.",
         )
+
     return user
 
 
 def normalize_email(email: str) -> str:
     try:
-        result = validate_email(email, check_deliverability=False)
+        result = validate_email(
+            email,
+            check_deliverability=False,
+        )
         return result.normalized.lower()
+
     except EmailNotValidError:
         raise HTTPException(
             status_code=422,
@@ -170,6 +312,7 @@ def save_chat_exchange(
     """Save a chat exchange belonging to one account."""
 
     db = SessionLocal()
+
     try:
         conversation = db.get(Conversation, session_id)
 
@@ -205,9 +348,11 @@ def save_chat_exchange(
         ])
 
         db.commit()
+
     except Exception:
         db.rollback()
         raise
+
     finally:
         db.close()
 
@@ -222,6 +367,7 @@ def save_generated_artifact(
     """Save an essay belonging to one account."""
 
     db = SessionLocal()
+
     try:
         conversation = db.get(Conversation, session_id)
 
@@ -253,9 +399,11 @@ def save_generated_artifact(
         )
 
         db.commit()
+
     except Exception:
         db.rollback()
         raise
+
     finally:
         db.close()
 
@@ -267,7 +415,7 @@ def save_generated_artifact(
 app = FastAPI(
     title="The Lenny Growth Assistant",
     description="An AI assistant for product and growth questions.",
-    version="0.4.0",
+    version="0.5.0",
 )
 
 app.add_middleware(
@@ -364,7 +512,7 @@ async def models():
                 "provider": "gemini",
                 "model": GEMINI_MODEL,
                 "local": False,
-                "configured": bool(os.getenv("GEMINI_API_KEY")),
+                "configured": bool(GEMINI_API_KEY),
             },
         ]
     }
@@ -385,8 +533,13 @@ async def register(request: RegisterRequest):
         )
 
     db = SessionLocal()
+
     try:
-        existing = db.query(User).filter(User.email == email).first()
+        existing = (
+            db.query(User)
+            .filter(User.email == email)
+            .first()
+        )
 
         if existing:
             raise HTTPException(
@@ -408,12 +561,14 @@ async def register(request: RegisterRequest):
     except HTTPException:
         db.rollback()
         raise
+
     except IntegrityError:
         db.rollback()
         raise HTTPException(
             status_code=409,
             detail="An account with this email already exists.",
         )
+
     finally:
         db.close()
 
@@ -423,8 +578,13 @@ async def login(request: LoginRequest):
     email = normalize_email(str(request.email))
 
     db = SessionLocal()
+
     try:
-        user = db.query(User).filter(User.email == email).first()
+        user = (
+            db.query(User)
+            .filter(User.email == email)
+            .first()
+        )
 
         if (
             user is None
@@ -440,6 +600,7 @@ async def login(request: LoginRequest):
             )
 
         return auth_response(user)
+
     finally:
         db.close()
 
@@ -472,6 +633,7 @@ async def google_login(request: GoogleLoginRequest):
             )
 
         google_id = claims.get("sub")
+
         if not google_id:
             raise HTTPException(
                 status_code=401,
@@ -480,14 +642,17 @@ async def google_login(request: GoogleLoginRequest):
 
     except HTTPException:
         raise
+
     except Exception:
         logger.exception("Google token verification failed")
+
         raise HTTPException(
             status_code=401,
             detail="Google sign-in verification failed.",
         )
 
     db = SessionLocal()
+
     try:
         user = (
             db.query(User)
@@ -496,16 +661,21 @@ async def google_login(request: GoogleLoginRequest):
         )
 
         if user is None:
-            user = db.query(User).filter(User.email == email).first()
+            user = (
+                db.query(User)
+                .filter(User.email == email)
+                .first()
+            )
 
             if user is not None:
-                # Link only after Google's verified-email check.
                 if user.google_id and user.google_id != google_id:
                     raise HTTPException(
                         status_code=409,
                         detail="This email is linked to another Google account.",
                     )
+
                 user.google_id = google_id
+
             else:
                 user = User(
                     email=email,
@@ -522,12 +692,14 @@ async def google_login(request: GoogleLoginRequest):
     except HTTPException:
         db.rollback()
         raise
+
     except IntegrityError:
         db.rollback()
         raise HTTPException(
             status_code=409,
             detail="Could not create or link this Google account.",
         )
+
     finally:
         db.close()
 
@@ -553,8 +725,9 @@ def build_instructions(sources: list[dict]) -> str:
         "Use podcast transcript excerpts when relevant. Cite transcript evidence "
         "using the exact source filename, for example [Source: product_growth.txt]. "
         "Never invent citations, statistics, quotes, episode details, or speaker claims. "
-        "If no excerpt supports an answer, say so and distinguish general knowledge "
-        "from transcript evidence."
+        "If no excerpt supports an answer, say so briefly and distinguish general "
+        "knowledge from transcript evidence. Do not spend the whole answer explaining "
+        "that no transcript was found. Answer the user's actual question."
     )
 
     if sources:
@@ -564,9 +737,11 @@ def build_instructions(sources: list[dict]) -> str:
             f"Excerpt: {item['text']}"
             for item in sources
         )
+
     else:
         source_text = (
             "No matching podcast transcript excerpts were found. "
+            "Answer using general knowledge when possible. "
             "Do not claim that the podcast supports the answer."
         )
 
@@ -586,71 +761,113 @@ async def chat(
     request: ChatRequest,
     user: User | None = Depends(get_current_user),
 ):
-    sources = search_transcripts(request.message, top_k=4)
+    sources = search_transcripts(
+        request.message,
+        top_k=4,
+    )
+
     instructions = build_instructions(sources)
 
     conversation = [
-        {"role": item.role, "content": item.content}
+        {
+            "role": item.role,
+            "content": item.content,
+        }
         for item in request.history[-10:]
     ]
 
     timestamp = datetime.now(timezone.utc).isoformat()
 
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            if request.provider == "gemini":
-                api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        async with httpx.AsyncClient(timeout=180.0) as client:
 
-                if not api_key:
+            # ---------------------------------------------
+            # GEMINI
+            # ---------------------------------------------
+
+            if request.provider == "gemini":
+
+                if not GEMINI_API_KEY:
                     raise HTTPException(
                         status_code=503,
-                        detail="Gemini is not configured. Configure GEMINI_API_KEY.",
+                        detail=(
+                            "Gemini is not configured. "
+                            "Configure GEMINI_API_KEY."
+                        ),
                     )
 
                 gemini_contents = [
                     {
-                        "role": "model" if item["role"] == "assistant" else "user",
-                        "parts": [{"text": item["content"]}],
+                        "role": (
+                            "model"
+                            if item["role"] == "assistant"
+                            else "user"
+                        ),
+                        "parts": [
+                            {"text": item["content"]}
+                        ],
                     }
                     for item in conversation
                 ]
+
                 gemini_contents.append(
-                    {"role": "user", "parts": [{"text": request.message}]}
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"text": request.message}
+                        ],
+                    }
                 )
 
                 response = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+                    (
+                        "https://generativelanguage.googleapis.com/"
+                        f"v1beta/models/{GEMINI_MODEL}:generateContent"
+                    ),
                     headers={
-                        "x-goog-api-key": api_key,
+                        "x-goog-api-key": GEMINI_API_KEY,
                         "Content-Type": "application/json",
                     },
                     json={
                         "systemInstruction": {
-                            "parts": [{"text": instructions}]
+                            "parts": [
+                                {"text": instructions}
+                            ],
                         },
                         "contents": gemini_contents,
                         "generationConfig": {
-                            "maxOutputTokens": 2048,
-                            "thinkingConfig": {
-                                  "thinkingLevel": "LOW"
-                             },
-                         },
+                            "maxOutputTokens": 4096,
+                            "temperature": 0.7,
+                        },
                     },
                 )
-                response.raise_for_status()
-                data = response.json()
-                answer = " ".join(
-                    part.get("text", "")
-                    for part in (
-                        data.get("candidates", [{}])[0]
-                        .get("content", {})
-                        .get("parts", [])
+
+                if not response.is_success:
+                    error_message = gemini_error_message(response)
+
+                    logger.error(
+                        "Gemini chat request failed. HTTP %s: %s",
+                        response.status_code,
+                        error_message,
                     )
-                    if part.get("text")
-                ).strip()
+
+                response.raise_for_status()
+
+                data = response.json()
+
+                answer = extract_gemini_text(
+                    data,
+                    "chat",
+                )
+
                 provider_name = f"gemini/{GEMINI_MODEL}"
 
+            # ---------------------------------------------
+            # OLLAMA
+            # ---------------------------------------------
+
             else:
+
                 history_text = "\n\n".join(
                     f"{item['role'].capitalize()}: {item['content']}"
                     for item in conversation
@@ -667,18 +884,26 @@ async def chat(
 
                 response = await client.post(
                     f"{OLLAMA_URL.rstrip('/')}/api/generate",
-                    headers={"Authorization": f"Bearer {OLLAMA_PROXY_TOKEN}"},
+                    headers={
+                        "Authorization": f"Bearer {OLLAMA_PROXY_TOKEN}"
+                    },
                     json={
                         "model": OLLAMA_MODEL,
                         "prompt": prompt,
                         "stream": False,
                         "keep_alive": "10m",
-                        "options": {"num_predict": 450},
+                        "options": {
+                            "num_predict": 700,
+                        },
                     },
                 )
+
                 response.raise_for_status()
+
                 data = response.json()
+
                 answer = (data.get("response") or "").strip()
+
                 provider_name = f"ollama/{OLLAMA_MODEL}"
 
         if not answer:
@@ -697,10 +922,14 @@ async def chat(
                     assistant_message=answer,
                     provider=provider_name,
                 )
+
             except HTTPException:
                 raise
+
             except Exception:
-                logger.exception("Chat succeeded but saving history failed")
+                logger.exception(
+                    "Chat succeeded but saving history failed"
+                )
 
         return ChatResponse(
             answer=answer,
@@ -719,8 +948,12 @@ async def chat(
 
     except HTTPException:
         raise
+
     except httpx.ConnectError:
-        logger.exception("Could not connect to the selected AI provider")
+        logger.exception(
+            "Could not connect to the selected AI provider"
+        )
+
         raise HTTPException(
             status_code=503,
             detail=(
@@ -728,26 +961,50 @@ async def chat(
                 "Check that the service is running and reachable."
             ),
         )
+
     except httpx.TimeoutException:
-        logger.exception("AI provider request timed out")
+        logger.exception(
+            "AI provider request timed out"
+        )
+
         raise HTTPException(
             status_code=504,
             detail="The model took too long to respond. Please retry.",
         )
+
     except httpx.HTTPStatusError as exc:
-        logger.error("AI provider returned HTTP %s", exc.response.status_code)
+        logger.error(
+            "AI provider returned HTTP %s",
+            exc.response.status_code,
+        )
+
+        if request.provider == "gemini":
+            detail = gemini_error_message(exc.response)
+
+            raise HTTPException(
+                status_code=502,
+                detail=f"Gemini API error: {detail}",
+            )
+
         raise HTTPException(
             status_code=502,
             detail=(
                 "The selected AI provider returned an error "
-                f"(HTTP {exc.response.status_code}). Check its configuration."
+                f"(HTTP {exc.response.status_code}). "
+                "Check its configuration."
             ),
         )
-    except (ValueError, KeyError, IndexError):
-        logger.exception("Could not parse the model response")
+
+    except (ValueError, KeyError, IndexError, TypeError):
+        logger.exception(
+            "Could not parse the model response"
+        )
+
         raise HTTPException(
             status_code=502,
-            detail="The selected AI provider returned an invalid response.",
+            detail=(
+                "The selected AI provider returned an invalid response."
+            ),
         )
 
 
@@ -794,68 +1051,104 @@ Finish with a clearly labeled "Actionable Takeaway" section.
 """
 
     try:
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            if request.provider == "gemini":
-                api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        async with httpx.AsyncClient(timeout=240.0) as client:
 
-                if not api_key:
+            # ---------------------------------------------
+            # GEMINI
+            # ---------------------------------------------
+
+            if request.provider == "gemini":
+
+                if not GEMINI_API_KEY:
                     raise HTTPException(
                         status_code=503,
-                        detail="Gemini is not configured. Configure GEMINI_API_KEY.",
+                        detail=(
+                            "Gemini is not configured. "
+                            "Configure GEMINI_API_KEY."
+                        ),
                     )
 
                 response = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+                    (
+                        "https://generativelanguage.googleapis.com/"
+                        f"v1beta/models/{GEMINI_MODEL}:generateContent"
+                    ),
                     headers={
-                        "x-goog-api-key": api_key,
+                        "x-goog-api-key": GEMINI_API_KEY,
                         "Content-Type": "application/json",
                     },
                     json={
                         "systemInstruction": {
-                            "parts": [{"text": instructions}]
+                            "parts": [
+                                {"text": instructions}
+                            ],
                         },
                         "contents": [
                             {
                                 "role": "user",
-                                "parts": [{"text": "Write the essay now."}],
+                                "parts": [
+                                    {"text": "Write the essay now."}
+                                ],
                             }
                         ],
                         "generationConfig": {
-                                "maxOutputTokens": 8192,
-                                "thinkingConfig": {
-                                       "thinkingLevel": "LOW"
-                                },
-                          },
+                            "maxOutputTokens": 8192,
+                            "temperature": 0.7,
+                        },
                     },
                 )
-                response.raise_for_status()
-                data = response.json()
-                markdown = " ".join(
-                    part.get("text", "")
-                    for part in (
-                        data.get("candidates", [{}])[0]
-                        .get("content", {})
-                        .get("parts", [])
+
+                if not response.is_success:
+                    error_message = gemini_error_message(response)
+
+                    logger.error(
+                        "Gemini essay request failed. HTTP %s: %s",
+                        response.status_code,
+                        error_message,
                     )
-                    if part.get("text")
-                ).strip()
+
+                response.raise_for_status()
+
+                data = response.json()
+
+                markdown = extract_gemini_text(
+                    data,
+                    "essay generation",
+                )
+
                 provider_name = f"gemini/{GEMINI_MODEL}"
 
+            # ---------------------------------------------
+            # OLLAMA
+            # ---------------------------------------------
+
             else:
+
                 response = await client.post(
                     f"{OLLAMA_URL.rstrip('/')}/api/generate",
-                    headers={"Authorization": f"Bearer {OLLAMA_PROXY_TOKEN}"},
+                    headers={
+                        "Authorization": f"Bearer {OLLAMA_PROXY_TOKEN}"
+                    },
                     json={
                         "model": OLLAMA_MODEL,
-                        "prompt": instructions + "\n\nWrite the essay now:",
+                        "prompt": (
+                            instructions
+                            + "\n\nWrite the essay now:"
+                        ),
                         "stream": False,
                         "keep_alive": "10m",
-                        "options": {"num_predict": 3000},
+                        "options": {
+                            "num_predict": 3000,
+                        },
                     },
                 )
+
                 response.raise_for_status()
+
                 data = response.json()
+
                 markdown = (data.get("response") or "").strip()
+
                 provider_name = f"ollama/{OLLAMA_MODEL}"
 
         if not markdown:
@@ -883,10 +1176,14 @@ Finish with a clearly labeled "Actionable Takeaway" section.
                     content=markdown,
                     provider=provider_name,
                 )
+
             except HTTPException:
                 raise
+
             except Exception:
-                logger.exception("Essay generated but saving it failed")
+                logger.exception(
+                    "Essay generated but saving it failed"
+                )
 
         return EssayResponse(
             title=title,
@@ -897,23 +1194,56 @@ Finish with a clearly labeled "Actionable Takeaway" section.
 
     except HTTPException:
         raise
+
     except httpx.TimeoutException:
-        logger.exception("Essay generation timed out")
+        logger.exception(
+            "Essay generation timed out"
+        )
+
         raise HTTPException(
             status_code=504,
             detail="Essay generation timed out. Try again.",
         )
+
     except httpx.ConnectError:
-        logger.exception("Could not connect to the selected provider")
+        logger.exception(
+            "Could not connect to the selected provider"
+        )
+
         raise HTTPException(
             status_code=503,
             detail="Could not connect to the selected AI provider.",
         )
+
     except httpx.HTTPStatusError as exc:
-        logger.error("Essay provider returned HTTP %s", exc.response.status_code)
+        logger.error(
+            "Essay provider returned HTTP %s",
+            exc.response.status_code,
+        )
+
+        if request.provider == "gemini":
+            detail = gemini_error_message(exc.response)
+
+            raise HTTPException(
+                status_code=502,
+                detail=f"Gemini API error: {detail}",
+            )
+
         raise HTTPException(
             status_code=502,
-            detail=f"The AI provider returned HTTP {exc.response.status_code}.",
+            detail=(
+                f"The AI provider returned HTTP {exc.response.status_code}."
+            ),
+        )
+
+    except (ValueError, KeyError, IndexError, TypeError):
+        logger.exception(
+            "Could not parse the essay response"
+        )
+
+        raise HTTPException(
+            status_code=502,
+            detail="The AI provider returned an invalid essay response.",
         )
 
 
@@ -931,6 +1261,7 @@ async def list_conversations(
         return {"conversations": []}
 
     db = SessionLocal()
+
     try:
         conversations = (
             db.query(Conversation)
@@ -951,12 +1282,17 @@ async def list_conversations(
                 for item in conversations
             ]
         }
+
     except Exception:
-        logger.exception("Failed to list conversations")
+        logger.exception(
+            "Failed to list conversations"
+        )
+
         raise HTTPException(
             status_code=500,
             detail="Could not load conversation history.",
         )
+
     finally:
         db.close()
 
@@ -969,6 +1305,7 @@ async def get_conversation(
     """Return a conversation only when it belongs to this user."""
 
     db = SessionLocal()
+
     try:
         conversation = (
             db.query(Conversation)
@@ -1001,14 +1338,20 @@ async def get_conversation(
                 for message in conversation.messages
             ],
         }
+
     except HTTPException:
         raise
+
     except Exception:
-        logger.exception("Failed to load conversation")
+        logger.exception(
+            "Failed to load conversation"
+        )
+
         raise HTTPException(
             status_code=500,
             detail="Could not load this conversation.",
         )
+
     finally:
         db.close()
 
@@ -1027,6 +1370,7 @@ async def list_artifacts(
         return {"artifacts": []}
 
     db = SessionLocal()
+
     try:
         artifacts = (
             db.query(GeneratedArtifact)
@@ -1053,12 +1397,17 @@ async def list_artifacts(
                 for item in artifacts
             ]
         }
+
     except Exception:
-        logger.exception("Failed to list saved essays")
+        logger.exception(
+            "Failed to list saved essays"
+        )
+
         raise HTTPException(
             status_code=500,
             detail="Could not load saved essays.",
         )
+
     finally:
         db.close()
 
@@ -1074,6 +1423,7 @@ async def clear_my_history(
     """Delete only the signed-in user's messages, essays and conversations."""
 
     db = SessionLocal()
+
     try:
         conversation_ids = (
             db.query(Conversation.id)
@@ -1083,13 +1433,17 @@ async def clear_my_history(
 
         deleted_messages = (
             db.query(ChatMessage)
-            .filter(ChatMessage.conversation_id.in_(conversation_ids))
+            .filter(
+                ChatMessage.conversation_id.in_(conversation_ids)
+            )
             .delete(synchronize_session=False)
         )
 
         deleted_artifacts = (
             db.query(GeneratedArtifact)
-            .filter(GeneratedArtifact.conversation_id.in_(conversation_ids))
+            .filter(
+                GeneratedArtifact.conversation_id.in_(conversation_ids)
+            )
             .delete(synchronize_session=False)
         )
 
@@ -1102,7 +1456,8 @@ async def clear_my_history(
         db.commit()
 
         logger.info(
-            "User %s cleared their history: %s messages, %s essays, %s conversations",
+            "User %s cleared their history: %s messages, "
+            "%s essays, %s conversations",
             user.id,
             deleted_messages,
             deleted_artifacts,
@@ -1121,10 +1476,15 @@ async def clear_my_history(
 
     except Exception:
         db.rollback()
-        logger.exception("Failed to clear user history")
+
+        logger.exception(
+            "Failed to clear user history"
+        )
+
         raise HTTPException(
             status_code=500,
             detail="Could not clear your history.",
         )
+
     finally:
         db.close()
