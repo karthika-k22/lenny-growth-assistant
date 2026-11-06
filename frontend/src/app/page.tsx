@@ -597,6 +597,57 @@ export default function Home() {
     }
   }
 
+
+async function deleteConversation(conversationId: string) {
+  if (!user || !token) {
+    setError("Sign in to delete a conversation.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    "Delete this conversation? Any saved essays will be preserved."
+  );
+
+  if (!confirmed) return;
+
+  setError("");
+
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/conversations/${conversationId}`,
+      {
+        method: "DELETE",
+        headers: authHeaders(),
+      },
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data.detail || "Could not delete conversation."
+      );
+    }
+
+    setConversations((previous) =>
+      previous.filter(
+        (conversation) => conversation.id !== conversationId
+      )
+    );
+
+    if (sessionId === conversationId) {
+      startNewChat();
+    }
+
+  } catch (err) {
+    setError(
+      err instanceof Error
+        ? err.message
+        : "Could not delete conversation."
+    );
+  }
+}
+
   // -------------------------------------------------------
   // CLEAR PRIVATE HISTORY
   // -------------------------------------------------------
@@ -1257,40 +1308,59 @@ export default function Home() {
                 </div>
               )}
 
-              {conversations.map(
-                (conversation, index) => (
-                  <button
-                    key={conversation.id}
-                    onClick={() =>
-                      void openConversation(
-                        conversation.id,
-                      )
-                    }
-                    title={
-                      conversation.title ||
-                      `Conversation ${index + 1}`
-                    }
-                    style={{
-                      ...styles.secondaryButton,
-                      textAlign: "left",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      background:
-                        sessionId === conversation.id
-                          ? "#17452c"
-                          : "#0d1d14",
-                      borderColor:
-                        sessionId === conversation.id
-                          ? "#3a9e62"
-                          : "#244632",
-                    }}
-                  >
-                    {conversation.title ||
-                      `Conversation ${index + 1}`}
-                  </button>
-                ),
-              )}
+              {conversations.map((conversation, index) => (
+  <div
+    key={conversation.id}
+    style={{
+      display: "grid",
+      gridTemplateColumns: "1fr auto",
+      gap: 6,
+    }}
+  >
+    <button
+      onClick={() =>
+        void openConversation(conversation.id)
+      }
+      title={
+        conversation.title ||
+        `Conversation ${index + 1}`
+      }
+      style={{
+        ...styles.secondaryButton,
+        textAlign: "left",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        background:
+          sessionId === conversation.id
+            ? "#17452c"
+            : "#0d1d14",
+        borderColor:
+          sessionId === conversation.id
+            ? "#3a9e62"
+            : "#244632",
+      }}
+    >
+      {conversation.title ||
+        `Conversation ${index + 1}`}
+    </button>
+
+    <button
+      onClick={() =>
+        void deleteConversation(conversation.id)
+      }
+      title="Delete conversation"
+      aria-label="Delete conversation"
+      style={{
+        ...styles.secondaryButton,
+        color: "#ff7777",
+        padding: "8px 12px",
+      }}
+    >
+      🗑
+    </button>
+  </div>
+))}
             </div>
           </section>
 

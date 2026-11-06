@@ -909,7 +909,10 @@ async def list_conversations(
     try:
         conversations = (
             db.query(Conversation)
-            .filter(Conversation.user_id == user.id)
+            .filter(
+                  Conversation.user_id == user.id,
+                  Conversation.title != "__SAVED_ESSAYS_ARCHIVE__",
+            )
             .order_by(Conversation.updated_at.desc())
             .all()
         )
@@ -1000,6 +1003,83 @@ async def get_conversation(
         db.close()
 
 
+@app.delete("/api/conversations/{session_id}")
+async def delete_conversation(
+    session_id: str,
+    user: User = Depends(require_user),
+):
+    db = SessionLocal()
+
+    try:
+        conversation = (
+            db.query(Conversation)
+            .filter(
+                Conversation.id == session_id,
+                Conversation.user_id == user.id,
+            )
+            .first()
+        )
+
+        if conversation is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Conversation not found.",
+            )
+
+        archive_id = f"saved-essays-archive-{user.id}"
+
+        archive = (
+            db.query(Conversation)
+            .filter(
+                Conversation.id == archive_id,
+                Conversation.user_id == user.id,
+            )
+            .first()
+        )
+
+        essays_exist = (
+            db.query(GeneratedArtifact)
+            .filter(
+                GeneratedArtifact.conversation_id == session_id
+            )
+            .first()
+        )
+
+        if essays_exist:
+            if archive is None:
+                archive = Conversation(
+                    id=archive_id,
+                    user_id=user.id,
+                    title="__SAVED_ESSAYS_ARCHIVE__",
+                )
+                db.add(archive)
+                db.flush()
+
+            db.query(GeneratedArtifact).filter(
+                GeneratedArtifact.conversation_id == session_id
+            ).update(
+                {"conversation_id": archive_id},
+                synchronize_session=False,
+            )
+
+        db.delete(conversation)
+        db.commit()
+
+        return {"message": "Conversation deleted successfully."}
+
+    except HTTPException:
+        raise
+
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to delete conversation")
+        raise HTTPException(
+            status_code=500,
+            detail="Could not delete this conversation.",
+        )
+
+    finally:
+        db.close()
 # ---------------------------------------------------------
 # PRIVATE GENERATED ESSAYS
 # ---------------------------------------------------------
