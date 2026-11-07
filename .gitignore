@@ -19,6 +19,7 @@ data/*.db
 data/*.sqlite
 data/*.sqlite3
 data/transcript_index.json
+data/knowledge_index.json
 
 # Environment and editor files
 .vscode/

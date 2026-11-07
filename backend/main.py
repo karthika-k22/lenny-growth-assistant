@@ -3,16 +3,13 @@ import logging
 import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Literal
+from contextlib import asynccontextmanager
 
 import httpx
 import jwt
 from dotenv import load_dotenv
 from email_validator import validate_email, EmailNotValidError
-from fastapi import (
-    FastAPI,
-    HTTPException,
-    Depends,
-)
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from google.auth.transport import requests as google_requests
@@ -22,7 +19,7 @@ from pwdlib import PasswordHash
 from pydantic import BaseModel, Field, EmailStr
 from sqlalchemy.exc import IntegrityError
 
-from backend.rag import search_transcripts
+from backend.rag import build_index, search_transcripts
 from backend.database import (
     SessionLocal,
     User,
@@ -205,6 +202,7 @@ def get_owned_conversation_history(
     finally:
         db.close()
 
+
 # ---------------------------------------------------------
 # DATABASE HELPERS
 # ---------------------------------------------------------
@@ -319,10 +317,24 @@ def save_generated_artifact(
 # APP CONFIGURATION
 # ---------------------------------------------------------
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    result = build_index()
+
+    logger.info(
+        "Knowledge base indexed: %s files, %s chunks",
+        result["indexed_files"],
+        result["chunks"],
+    )
+
+    yield
+
+
 app = FastAPI(
     title="The Lenny Growth Assistant",
     description="An AI assistant for product and growth questions.",
     version="0.5.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -336,7 +348,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # ---------------------------------------------------------
 # REQUEST AND RESPONSE MODELS
@@ -634,31 +645,31 @@ def build_instructions(sources: list[dict]) -> str:
         "Only explain further when the user asks for detail. "
         "For complex questions, use short paragraphs and relevant bullets. "
 
-        "PODCAST SOURCES: "
-        "Use transcript excerpts when relevant. "
-        "Cite evidence using the exact source filename. "
-        "Never invent citations, statistics, quotes, or episode details. "
-        "If no transcript matches, answer using general knowledge. "
-        "Do not mention missing transcripts or add disclaimers. "
-        "Never claim general knowledge came from a podcast."
+        "KNOWLEDGE BASE SOURCES: "
+        "Use retrieved knowledge-base excerpts when relevant. "
+        "Cite supporting evidence using the exact source filename. "
+        "Never invent citations, statistics, or quotes. "
+        "If no knowledge-base source matches, answer using general knowledge. "
+        "Do not mention missing sources or add unnecessary disclaimers. "
+        "Never attribute general knowledge to the knowledge base."
     )
 
     if sources:
         source_text = "\n\n".join(
-            f"Episode: {item['episode']}\n"
+            f"Document: {item['episode']}\n"
             f"Source file: {item['source']}\n"
             f"Excerpt: {item['text']}"
             for item in sources
         )
     else:
         source_text = (
-            "No matching transcript excerpts were found. "
-            "Use general knowledge without claiming podcast support."
+            "No matching knowledge-base excerpts were found. "
+            "Use general knowledge without claiming knowledge-base support."
         )
 
     return (
         instructions
-        + "\n\nPODCAST TRANSCRIPT SEARCH RESULTS:\n"
+        + "\n\nKNOWLEDGE BASE SEARCH RESULTS:\n"
         + source_text
     )
 
@@ -764,24 +775,28 @@ async def chat(
 
     except HTTPException:
         raise
+
     except httpx.TimeoutException:
         logger.exception("Groq chat request timed out")
         raise HTTPException(
             status_code=504,
             detail="The model took too long to respond. Please retry.",
         )
+
     except httpx.ConnectError:
         logger.exception("Could not connect to Groq")
         raise HTTPException(
             status_code=503,
             detail="Could not connect to Groq. Please retry.",
         )
+
     except httpx.HTTPStatusError as exc:
         logger.error("Groq returned HTTP %s", exc.response.status_code)
         raise HTTPException(
             status_code=502,
             detail=f"Groq API error (HTTP {exc.response.status_code}). Check your API configuration or try again later.",
         )
+
     except (ValueError, KeyError, IndexError, TypeError):
         logger.exception("Could not parse the Groq response")
         raise HTTPException(
@@ -826,7 +841,7 @@ STRUCTURE:
 FACTUAL ACCURACY:
 - Never invent statistics, studies, citations, quotations, or research findings.
 - Do not attribute claims to real companies or people without reliable support.
-- Do not imply the essay is based on podcast transcripts.
+- Do not claim the essay is based on knowledge-base sources unless explicitly cited.
 - Clearly identify hypothetical examples.
 - Prefer clear reasoning over unsupported claims.
 - Avoid repetitive introductions and conclusions.
@@ -915,24 +930,31 @@ Finish with a clearly labeled "Actionable Takeaway" section.
 
     except HTTPException:
         raise
+
     except httpx.TimeoutException:
         logger.exception("Groq essay generation timed out")
         raise HTTPException(
             status_code=504,
             detail="Essay generation timed out. Try again.",
         )
+
     except httpx.ConnectError:
         logger.exception("Could not connect to Groq")
         raise HTTPException(
             status_code=503,
             detail="Could not connect to Groq.",
         )
+
     except httpx.HTTPStatusError as exc:
-        logger.error("Groq essay request returned HTTP %s", exc.response.status_code)
+        logger.error(
+            "Groq essay request returned HTTP %s",
+            exc.response.status_code,
+        )
         raise HTTPException(
             status_code=502,
             detail=f"Groq API error (HTTP {exc.response.status_code}). Check your API configuration or try again later.",
         )
+
     except (ValueError, KeyError, IndexError, TypeError):
         logger.exception("Could not parse the Groq essay response")
         raise HTTPException(
@@ -960,8 +982,8 @@ async def list_conversations(
         conversations = (
             db.query(Conversation)
             .filter(
-                  Conversation.user_id == user.id,
-                  Conversation.title != "__SAVED_ESSAYS_ARCHIVE__",
+                Conversation.user_id == user.id,
+                Conversation.title != "__SAVED_ESSAYS_ARCHIVE__",
             )
             .order_by(Conversation.updated_at.desc())
             .all()
@@ -981,9 +1003,7 @@ async def list_conversations(
         }
 
     except Exception:
-        logger.exception(
-            "Failed to list conversations"
-        )
+        logger.exception("Failed to list conversations")
 
         raise HTTPException(
             status_code=500,
@@ -1040,9 +1060,7 @@ async def get_conversation(
         raise
 
     except Exception:
-        logger.exception(
-            "Failed to load conversation"
-        )
+        logger.exception("Failed to load conversation")
 
         raise HTTPException(
             status_code=500,
@@ -1123,6 +1141,7 @@ async def delete_conversation(
     except Exception:
         db.rollback()
         logger.exception("Failed to delete conversation")
+
         raise HTTPException(
             status_code=500,
             detail="Could not delete this conversation.",
@@ -1130,6 +1149,8 @@ async def delete_conversation(
 
     finally:
         db.close()
+
+
 # ---------------------------------------------------------
 # PRIVATE GENERATED ESSAYS
 # ---------------------------------------------------------
@@ -1173,9 +1194,7 @@ async def list_artifacts(
         }
 
     except Exception:
-        logger.exception(
-            "Failed to list saved essays"
-        )
+        logger.exception("Failed to list saved essays")
 
         raise HTTPException(
             status_code=500,
@@ -1251,9 +1270,7 @@ async def clear_my_history(
     except Exception:
         db.rollback()
 
-        logger.exception(
-            "Failed to clear user history"
-        )
+        logger.exception("Failed to clear user history")
 
         raise HTTPException(
             status_code=500,

@@ -1,15 +1,14 @@
-
 from backend.rag import build_index, search_transcripts
 
 
-def test_search_returns_relevant_transcript():
+def test_search_returns_relevant_knowledge():
     build_index()
 
     results = search_transcripts("product growth", top_k=4)
 
     assert isinstance(results, list)
     assert len(results) > 0
-    assert "source" in results[0]
+    assert results[0]["source"] == "product_growth_fundamentals.md"
     assert "episode" in results[0]
     assert "text" in results[0]
 
