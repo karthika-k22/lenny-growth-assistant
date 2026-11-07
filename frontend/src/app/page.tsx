@@ -1731,37 +1731,6 @@ async function deleteConversation(conversationId: string) {
                     </ReactMarkdown>
                   </div>
 
-                  {/* SOURCES */}
-
-                  {message.sources &&
-                    message.sources.length > 0 && (
-                      <div
-                        style={{
-                          marginTop: 14,
-                          borderTop: "1px solid #28513a",
-                          paddingTop: 10,
-                          fontSize: 12,
-                          color: "#9db9a7",
-                        }}
-                      >
-                        <strong>Sources</strong>
-
-                        <ul>
-                          {message.sources.map(
-                            (source, sourceIndex) => (
-                              <li key={sourceIndex}>
-                                {typeof source === "string"
-                                  ? source
-                                  : source.source ||
-                                    source.episode ||
-                                    "Transcript"}
-                              </li>
-                            ),
-                          )}
-                        </ul>
-                      </div>
-                    )}
-
                   {/* COPY AND DOWNLOAD */}
 
                   {message.role === "assistant" &&
