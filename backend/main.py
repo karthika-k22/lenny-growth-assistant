@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import re
 from datetime import datetime, timezone, timedelta
 from typing import Literal
 from contextlib import asynccontextmanager
@@ -635,30 +636,37 @@ def build_instructions(sources: list[dict]) -> str:
         "growth, experimentation, and leadership. "
         "Use conversation history for follow-up questions. "
 
-        "RESPONSE STYLE: "
-        "Be concise and answer the exact question. "
-        "For simple questions and definitions, use 1-3 sentences "
-        "and aim for fewer than 50 words. "
-        "Give the direct answer first. "
-        "Do not add unnecessary headings, introductions, conclusions, "
-        "examples, lists, or background information. "
-        "Only explain further when the user asks for detail. "
-        "For complex questions, use short paragraphs and relevant bullets. "
+        "WRITING STYLE: "
+        "Write like a thoughtful, experienced advisor having a natural conversation. "
+        "Prioritize clarity, flow, readability, and useful insight. "
+        "Start directly with the answer, not a generic introduction. "
+        "Use natural paragraphs to explain connected ideas. "
+        "Separate paragraphs with proper Markdown blank lines. "
+        "Keep paragraphs focused, usually 2-4 sentences. "
+        "Avoid turning every answer into a numbered outline. "
+        "Do not use numbered lists unless explaining a sequence or ordered process. "
+        "Use bullets only when presenting genuinely separate items. "
+        "Use headings only for longer answers that need clear sections. "
+        "Avoid unnecessary headings, repetitive conclusions, and filler. "
+        "Use tables only when comparing multiple items or presenting structured data. "
+        "Highlight important terms selectively, not entire sentences. "
+        "For simple questions, answer in 1-3 natural sentences. "
+        "For detailed questions, explain the reasoning with relevant examples. "
+        "Never sacrifice clarity just to make an answer shorter. "
 
         "KNOWLEDGE BASE SOURCES: "
-        "Use retrieved knowledge-base excerpts when relevant. "
-        "Cite supporting evidence using the exact source filename. "
-        "Never invent citations, statistics, or quotes. "
+        "Use retrieved knowledge-base excerpts when relevant to improve accuracy. "
+        "Use the retrieved information naturally without displaying filenames, "
+        "document names, internal source labels, or technical retrieval details. "
+        "Do not append source references at the end of answers. "
+        "Never invent statistics, studies, quotations, or research findings. "
         "If no knowledge-base source matches, answer using general knowledge. "
-        "Do not mention missing sources or add unnecessary disclaimers. "
-        "Never attribute general knowledge to the knowledge base."
+        "Never attribute unsupported claims to the knowledge base."
     )
 
     if sources:
         source_text = "\n\n".join(
-            f"Document: {item['episode']}\n"
-            f"Source file: {item['source']}\n"
-            f"Excerpt: {item['text']}"
+            f"Relevant knowledge:\n{item['text']}"
             for item in sources
         )
     else:
@@ -742,6 +750,27 @@ async def chat(
             )
 
         answer = answer.strip()
+
+        # Remove internal knowledge-base citations from user-facing answers.
+        answer = re.sub(
+            r"(?im)^\s*\*{0,2}\s*Source:\s*.*(?:\.(?:md|txt|pdf|docx?)).*\*{0,2}\s*$",
+            "",
+            answer,
+        )
+        answer = re.sub(
+            r"\u3010[^\u3011]*\.(?:md|txt|pdf|docx?)[^\u3011]*\u3011",
+            "",
+            answer,
+            flags=re.IGNORECASE,
+        )
+        answer = re.sub(
+            r"\s*\(?\s*(?:source:\s*)?(?:see\s+)?\*{0,2}[\w.-]+\.(?:md|txt|pdf|docx?)\*{0,2}(?:\s+for\b[^)\n]*)?\s*\)?",
+            "",
+            answer,
+            flags=re.IGNORECASE,
+        )
+        answer = re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n", answer).strip()
+
         provider_name = f"groq/{GROQ_MODEL}"
 
         if user is not None:

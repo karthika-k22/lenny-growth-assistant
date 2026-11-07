@@ -1,10 +1,10 @@
+
 @import "tailwindcss";
 
 :root {
   --background: #ffffff;
   --foreground: #171717;
 }
-
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -23,4 +23,118 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Chat and essay Markdown typography */
+.markdown-content {
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+  color: inherit;
+}
+
+.markdown-content > *:first-child {
+  margin-top: 0;
+}
+
+.markdown-content > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content p {
+  margin: 0 0 18px;
+  line-height: 1.8;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  font-weight: 650;
+  line-height: 1.35;
+  margin: 26px 0 12px;
+}
+
+.markdown-content h1 {
+  font-size: 1.4rem;
+}
+
+.markdown-content h2 {
+  font-size: 1.2rem;
+}
+
+.markdown-content h3 {
+  font-size: 1.05rem;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin: 10px 0 20px;
+  padding-left: 25px;
+}
+
+.markdown-content li {
+  margin: 0 0 9px;
+  padding-left: 3px;
+  line-height: 1.75;
+}
+
+.markdown-content li > p {
+  margin-bottom: 8px;
+}
+
+.markdown-content strong {
+  font-weight: 650;
+}
+
+.markdown-content blockquote {
+  margin: 18px 0;
+  padding: 4px 0 4px 16px;
+  border-left: 3px solid #999;
+  opacity: 0.9;
+}
+
+.markdown-content table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 18px 0 22px;
+}
+
+.markdown-content th,
+.markdown-content td {
+  padding: 10px 12px;
+  border: 1px solid #88888855;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-content th {
+  font-weight: 650;
+}
+
+.markdown-content code {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: #88888820;
+  font-size: 0.9em;
+}
+
+.markdown-content pre {
+  overflow-x: auto;
+  padding: 14px;
+  margin: 16px 0;
+  border-radius: 8px;
+  background: #88888815;
+}
+
+.markdown-content pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.markdown-content hr {
+  margin: 22px 0;
+  border: 0;
+  border-top: 1px solid #88888840;
 }
