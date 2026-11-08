@@ -28,3 +28,9 @@ data/knowledge_index.json
 # Logs
 *.log
 data/transcripts/
+
+# Temporary local files
+*.bak
+*.tmp
+lenny-growth-assistant-documentation/
+lenny-growth-assistant-documentation.zip
