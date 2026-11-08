@@ -1,200 +1,148 @@
-\# Architecture: The Lenny Growth Assistant
+# Architecture: Lenny Growth Assistant
 
+## 1. Overview
 
+Lenny Growth Assistant is a full-stack AI application for exploring product growth concepts through conversational questions and generating long-form essays.
 
-\## 1. Overview
+The system consists of a Next.js frontend, a FastAPI backend, a transcript retrieval module, a Groq-powered language model integration, and SQLAlchemy-based persistence.
 
+## 2. System Components
 
+### Frontend
 
-The Lenny Growth Assistant is a full-stack conversational application for asking questions about podcast transcripts and generating long-form growth essays.
+- Built with Next.js, React, and TypeScript.
+- Provides the conversational chat interface.
+- Supports the Ship 30 essay-generation workflow.
+- Renders assistant responses and generated Markdown.
+- Provides access to conversation history and saved artifacts.
+- Supports user authentication.
 
+### Backend API
 
+- Built with FastAPI.
+- Handles authentication, chat requests, essay generation, and data management.
+- Coordinates transcript retrieval and language model requests.
+- Validates ownership of authenticated users' data.
+- Persists conversations, messages, and artifacts through SQLAlchemy.
 
-The application uses a Next.js frontend, a FastAPI backend, a transcript retrieval module, configurable language model providers, and SQLite persistence.
+### Retrieval Module
 
+- Transcript files are stored in `data/transcripts/`.
+- Transcript content is divided into chunks.
+- Chunks retain source and episode metadata.
+- Queries are matched against indexed chunks using keyword-based ranking.
+- The highest-ranked chunks are selected as context for the language model.
 
+The current retrieval approach is lightweight and does not use vector embeddings.
 
-\## 2. System Components
+### Language Model Integration
 
+- Uses the Groq API for inference.
+- The configured model is `openai/gpt-oss-20b`.
+- The backend sends user prompts and relevant retrieved context to the model.
+- API credentials remain on the backend and are not exposed to the frontend.
+- Provider errors, missing configuration, and request failures are handled by the backend.
 
+### Persistence
 
-\### Frontend
+- SQLAlchemy manages database access.
+- SQLite is used by default.
+- PostgreSQL can be configured through `DATABASE_URL`.
+- Stored data includes users, conversations, messages, and generated artifacts.
+- Authenticated data access is scoped to the owning user.
 
-\- Built with Next.js, React, and TypeScript.
+## 3. Request Flow
 
-\- Provides conversational chat and provider selection.
+### Conversational Chat
 
-\- Displays retrieved source references.
+1. The user submits a question through the frontend.
+2. The frontend sends the request to the FastAPI backend.
+3. The backend validates the request and authentication context.
+4. For authenticated conversations, existing history is loaded from the database.
+5. The retrieval module searches indexed transcript chunks.
+6. Relevant context and the conversation prompt are sent to Groq.
+7. The backend returns the generated response.
+8. Conversation messages are persisted.
+9. The frontend displays the response.
 
-\- Supports the Ship 30 for 30 essay-generation workflow.
+### Essay Generation
 
-\- Shows generated Markdown and its source in a side-by-side viewer.
+1. The user submits an essay topic and relevant instructions.
+2. The frontend sends the request to the essay-generation endpoint.
+3. The backend processes the request and obtains a model response.
+4. The generated essay is returned to the frontend.
+5. Saved essays are stored as artifacts for later access.
 
-\- Provides access to saved conversations and artifacts.
-
-
-
-\### Backend API
-
-\- Built with FastAPI.
-
-\- Exposes health, model, chat, essay-generation, conversation-history, and artifact endpoints.
-
-\- Coordinates retrieval, language model requests, and persistence.
-
-\- Returns structured responses and handles provider errors.
-
-
-
-\### Retrieval
-
-\- Transcript text files are placed in `data/transcripts/`.
-
-\- The indexing process divides transcripts into overlapping chunks.
-
-\- Each chunk stores its source filename, episode label, text, and term frequencies.
-
-\- Query terms are scored using a TF-IDF-inspired keyword-ranking method.
-
-\- The highest-ranked chunks are returned as context for answering questions.
-
-
-
-\### Language Model Providers
-
-\- Ollama with `qwen2.5:3b` supports local inference.
-
-\- OpenAI is available as a cloud-provider option when valid credentials and quota are configured.
-
-\- Provider failures should be communicated clearly to the user.
-
-
-
-\### Persistence
-
-\- SQLAlchemy manages database access.
-
-\- SQLite stores conversations, messages, and generated artifacts.
-
-\- The database is local and excluded from the public Git repository.
-
-
-
-\## 3. Request Flow
-
-
-
-1\. The user submits a question or essay-generation request through the frontend.
-
-2\. The frontend sends the request to the FastAPI backend.
-
-3\. For transcript questions, the retrieval module searches indexed chunks.
-
-4\. The selected provider receives the request and relevant context.
-
-5\. The backend returns the answer, provider information, and source references.
-
-6\. Conversation messages and generated artifacts are saved to SQLite.
-
-7\. The frontend renders the response and updates the history and artifact views.
-
-
-
-\## 4. Data Flow
-
-
+## 4. Data Flow
 
 ```text
-
-Transcript text files
-
-&#x20;       |
-
-&#x20;      v
-
-Chunking and keyword indexing
-
-&#x20;       |
-
-&#x20;      v
-
-Query-based transcript retrieval
-
-&#x20;       |
-
-&#x20;      v
-
-FastAPI orchestration <----> Ollama / OpenAI
-
-&#x20;       |
-
-&#x20;      v
-
-SQLite persistence
-
-&#x20;       |
-
-&#x20;      v
-
-Next.js user interface
-
+Transcript Files
+       |
+       v
+Chunking and Keyword Indexing
+       |
+       v
+Query-Based Retrieval
+       |
+       v
+FastAPI Backend <----> Groq API
+       |
+       v
+SQLAlchemy Persistence
+       |
+       v
+SQLite / PostgreSQL
+       |
+       v
+Next.js Frontend
 ```
 
+## 5. API Surface
 
+| Method | Endpoint | Responsibility |
+|---|---|---|
+| GET | `/health` | Health check |
+| GET | `/api/models` | Model configuration |
+| POST | `/api/auth/register` | User registration |
+| POST | `/api/auth/login` | User login |
+| POST | `/api/auth/google` | Google authentication |
+| GET | `/api/auth/me` | Current user |
+| POST | `/api/chat` | Conversational AI |
+| POST | `/api/ship-30` | Essay generation |
+| GET | `/api/conversations` | Conversation listing |
+| GET | `/api/conversations/{session_id}` | Conversation retrieval |
+| DELETE | `/api/conversations/{session_id}` | Conversation deletion |
+| GET | `/api/artifacts` | Saved artifact listing |
+| DELETE | `/api/history` | History clearing |
 
-\## 5. API Surface
+Interactive API documentation is available at `/docs` when the backend is running.
 
+## 6. Security and Data Integrity
 
+- Secrets and API credentials are configured through environment variables.
+- Passwords are hashed using Argon2.
+- Authentication uses JWT tokens.
+- Authenticated users can access only their own conversations and artifacts.
+- Conversation ownership is validated before processing requests.
+- Authenticated conversation history is loaded from the database rather than trusted from frontend-supplied history.
+- Retrieved transcript content is treated as contextual data, not trusted instructions.
+- Database records are associated with their owning users.
 
-\- `GET /health`: health check.
+## 7. Deployment
 
-\- `GET /api/models`: provider and model options.
+The application uses a separately deployed frontend and backend.
 
-\- `POST /api/chat`: conversational requests.
+- Frontend: Vercel
+- Backend: Render
 
-\- `POST /api/ship-30`: essay generation.
+The frontend communicates with the backend through `NEXT_PUBLIC_API_URL`. Production secrets and database configuration are supplied through hosting environment variables.
 
-\- `GET /api/conversations`: conversation listing.
+A persistent database configuration is required for reliable production data retention.
 
-\- `GET /api/conversations/{session\_id}`: conversation retrieval.
+## 8. Current Limitations
 
-\- `GET /api/artifacts`: saved artifact listing.
-
-
-
-The interactive API documentation is available at `/docs` when the backend is running.
-
-
-
-\## 6. Reliability and Security
-
-
-
-\- API credentials must be provided through environment configuration and must not be committed.
-
-\- Local database and generated index files are excluded from Git.
-
-\- Provider connectivity, credentials, and quota can affect inference availability.
-
-\- Retrieved text is context, not trusted instructions.
-
-\- Generated HTML must be sanitized and isolated before rendering.
-
-\- A production deployment requires secure configuration, persistent hosting, and additional end-to-end testing.
-
-
-
-\## 7. Current Limitations
-
-
-
-\- Retrieval uses keyword ranking rather than semantic embeddings.
-
-\- SQLite is local rather than a hosted PostgreSQL database.
-
-\- Local operation is available, but public production deployment must be configured separately.
-
-\- Automated tests currently cover core retrieval behavior and selected API endpoints.
-
-
-
+- Retrieval is based on keyword ranking rather than semantic embeddings.
+- Retrieval quality depends on transcript coverage and query wording.
+- Model availability and API limits depend on the external Groq service.
+- Production database persistence must be verified against the actual hosting configuration.
+- Automated tests cover selected backend behavior but do not constitute complete end-to-end coverage.
