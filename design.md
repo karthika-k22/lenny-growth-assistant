@@ -1,146 +1,102 @@
-\# Design: The Lenny Growth Assistant
+# Design: Lenny Growth Assistant
 
+## 1. Design Goals
 
+- Make product growth knowledge easier to explore.
+- Provide a focused conversational interface.
+- Make long-form essay generation practical and structured.
+- Allow users to revisit and manage saved work.
+- Keep authentication and personal data handling straightforward.
+- Communicate errors clearly instead of presenting failed requests as successful results.
 
-\## 1. Design Goals
+## 2. Main Interface
 
+### Conversation Sidebar
 
+- Displays saved conversations and generated essays.
+- Allows users to reopen previous work.
+- Provides conversation management controls.
+- Separates conversation history from saved artifacts.
 
-\- Make asking questions about podcast transcripts simple.
+### Chat Workspace
 
-\- Keep the chat interface readable and easy to navigate.
+- Provides a message input and conversation area.
+- Renders assistant responses using Markdown.
+- Supports transcript-backed answers.
+- Displays useful loading and error feedback.
+- Maintains the active conversation context.
 
-\- Make generated essays easy to review, copy, and reuse.
+### Ship 30 Workspace
 
-\- Provide clear access to model selection and saved work.
+- Accepts an essay topic and writing instructions.
+- Generates structured long-form content.
+- Organizes the output for readability and reuse.
+- Supports saving generated essays as artifacts.
 
-\- Support local inference to reduce dependence on paid cloud APIs.
+### Artifact Viewer
 
+- Displays saved essay content.
+- Preserves Markdown structure.
+- Supports reviewing and reusing generated work.
 
+### Authentication
 
-\## 2. Main Interface
+- Supports account registration and login.
+- Supports Google authentication when configured.
+- Associates saved conversations and artifacts with authenticated users.
 
+## 3. Interaction Principles
 
+- Keep the primary workspace focused on the current task.
+- Make chat and essay-generation workflows easy to distinguish.
+- Preserve saved work when users navigate between sections.
+- Provide clear confirmation for destructive actions.
+- Preserve saved essays when their originating conversation is deleted.
+- Avoid showing internal implementation details in user-facing responses.
+- Communicate when a request fails or relevant information is unavailable.
 
-\### Conversation Sidebar
+## 4. Visual Design
 
-\- Displays recent saved conversations and generated essays.
+The interface uses a dark workspace with a sidebar and a main content area.
 
-\- Allows the user to reopen saved work.
+The sidebar organizes conversations and saved essays. The main workspace prioritizes chat or essay content depending on the active workflow.
 
-\- Includes a control to collapse or resize the sidebar.
+Assistant responses use Markdown formatting to improve readability, particularly for structured explanations, headings, and lists.
 
-\- Provides a refresh action for saved history.
+## 5. Error and Empty States
 
+The interface should handle:
 
+- Missing or invalid authentication.
+- Backend connectivity failures.
+- Missing Groq configuration.
+- Model API errors and rate limits.
+- Requests that return no useful transcript context.
+- Empty conversation history.
+- Empty saved artifact collections.
+- Failed conversation or artifact operations.
 
-\### Chat Workspace
+## 6. Security and Accessibility
 
-\- Provides a message input and conversation area.
+- API keys and private credentials must remain on the backend.
+- User-specific records must be protected by ownership checks.
+- Retrieved transcript content must be treated as untrusted context.
+- Markdown rendering must not allow unsafe HTML execution.
+- Inputs and controls should have clear labels.
+- Text and controls should remain readable across supported screen sizes.
 
-\- Displays assistant responses as Markdown.
+## 7. Current Scope
 
-\- Shows transcript source references when available.
+The current application includes:
 
-\- Provides a provider selector for choosing the inference option.
+- Conversational AI.
+- Transcript-based retrieval.
+- Long-form essay generation.
+- User authentication.
+- Conversation history.
+- Saved artifacts.
+- Individual conversation deletion.
+- User-specific data isolation.
+- SQLite and PostgreSQL database support.
 
-
-
-\### Ship 30 for 30 Workspace
-
-\- Accepts an essay topic and intended audience.
-
-\- Requests a structured long-form essay.
-
-\- Organizes the result into a title, opening hook, narrative progression, and actionable takeaway.
-
-\- Saves the generated essay as an artifact.
-
-
-
-\### Artifact Viewer
-
-\- Displays the generated Markdown alongside its source text.
-
-\- Supports copying or downloading the content.
-
-\- Allows users to review the essay without losing its structure.
-
-
-
-\## 3. Interaction Principles
-
-
-
-\- Keep the main writing and conversation areas visible.
-
-\- Make provider selection explicit.
-
-\- Preserve saved conversations so users can return to earlier discussions.
-
-\- Show useful feedback when requests fail.
-
-\- Avoid presenting unavailable transcript evidence as verified fact.
-
-\- Keep the interface focused on the user's current task.
-
-
-
-\## 4. Visual Design
-
-
-
-The interface uses a dark, compact workspace with a sidebar and a main content area. The sidebar separates conversation history from generated essays. The primary workspace gives the chat or essay content most of the available space.
-
-
-
-The essay view uses a side-by-side layout so the rendered Markdown and its source can be reviewed together.
-
-
-
-\## 5. Error and Empty States
-
-
-
-The interface should communicate when:
-
-\- The selected model provider is unavailable.
-
-\- A cloud API key is missing or the provider quota is exhausted.
-
-\- Transcript retrieval returns no useful context.
-
-\- A request times out or fails.
-
-\- No conversations or saved artifacts exist yet.
-
-
-
-\## 6. Security and Accessibility
-
-
-
-\- Do not expose API keys in the frontend or source control.
-
-\- Treat retrieved transcript content as untrusted input.
-
-\- Sanitize and isolate generated HTML before rendering it.
-
-\- Provide clear labels for inputs and controls.
-
-\- Maintain readable contrast and usable controls at different screen sizes.
-
-
-
-\## 7. Current Scope
-
-
-
-The current implementation provides chat, model selection, transcript retrieval, essay generation, Markdown viewing, and local history persistence.
-
-
-
-The design document describes the intended interaction and safety principles. Any behavior not verified in the running application should be treated as a requirement for further testing rather than a completed feature.
-
-
-
+The design document describes the intended experience and interaction principles. Any behavior not verified through testing should be treated as requiring further validation.
