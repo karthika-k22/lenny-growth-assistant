@@ -669,6 +669,8 @@ def build_instructions(sources: list[dict]) -> str:
         "When combining multiple knowledge-base sources, keep each source's claims separate. "
         "Never attribute a general principle from one source to a specific company or person discussed in another source. "
         "Do not infer that two concepts are causally connected merely because they appear in the same answer. "
+        "When explaining multiple sources, explicitly label which points are general principles and which are company-specific evidence. "
+        "Never claim that a company's growth, retention, or business outcomes were caused by a particular strategy unless the retrieved excerpts explicitly establish that causal link. "
         "Preserve the speaker's qualifications, uncertainty, and nuance. "
         "Do not create a chronological sequence or claim a strategic shift unless "
         "the retrieved excerpts explicitly establish that sequence. "
