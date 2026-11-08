@@ -1,332 +1,225 @@
-\# The Lenny Growth Assistant
+# Lenny Growth Assistant
 
+A full-stack AI growth assistant that helps users explore product growth concepts through conversational Q&A and generate long-form essays using a transcript-backed knowledge base.
 
+**Live application:** https://lenny-growth-assistant-jet.vercel.app
 
-A full-stack AI assistant for exploring podcast transcripts, asking growth-related questions, and generating structured long-form essays.
+## Features
 
+- **AI Growth Chat:** Ask questions about product management, startups, growth, and related topics.
+- **Transcript Retrieval:** Retrieves relevant passages from the configured transcript knowledge base to provide context for answers.
+- **Ship 30:** Generate structured, long-form essays from a topic and intended audience.
+- **User Authentication:** Register, log in, and authenticate using Google when configured.
+- **Conversation History:** Save and revisit conversations.
+- **Saved Essays:** Store generated essays as artifacts.
+- **Data Isolation:** Authenticated users can access only their own conversations and artifacts.
+- **Conversation Management:** Delete individual conversations while preserving saved essays.
+- **Persistent Storage:** SQLAlchemy supports SQLite by default and PostgreSQL through database configuration.
 
+## Tech Stack
 
-\## Features
+| Layer | Technologies |
+|---|---|
+| Frontend | Next.js, React, TypeScript, Tailwind CSS |
+| Backend | Python, FastAPI |
+| Database | SQLAlchemy, SQLite, PostgreSQL support |
+| AI Provider | Groq API |
+| Model | `openai/gpt-oss-20b` |
+| Retrieval | Transcript chunking and keyword-based ranking |
+| Authentication | JWT, Argon2 password hashing, Google authentication |
+| Testing | Pytest |
 
+## Architecture
 
+The application uses a Next.js frontend connected to a FastAPI backend.
 
-\- \*\*Conversational AI:\*\* Ask questions about indexed podcast transcripts.
+For transcript-based questions, the backend retrieves relevant transcript chunks and supplies them as context to the language model. Conversation and artifact data are stored through SQLAlchemy.
 
-\- \*\*Transcript retrieval:\*\* Searches transcript chunks and returns relevant source references.
+See [architecture.md](architecture.md) for the system architecture and [design.md](design.md) for the interface and interaction principles.
 
-\- \*\*Local LLM support:\*\* Uses Ollama with `qwen2.5:3b` for local inference.
+## Project Structure
 
-\- \*\*Cloud model option:\*\* Supports OpenAI when API credentials and quota are available.
+```text
+lenny-growth-assistant/
+├── backend/
+│   ├── main.py
+│   ├── database.py
+│   └── rag.py
+├── data/
+│   └── transcripts/
+├── frontend/
+│   ├── src/
+│   ├── public/
+│   └── package.json
+├── tests/
+├── architecture.md
+├── design.md
+├── requirements.txt
+├── .env.example
+└── README.md
+```
 
-\- \*\*Conversation history:\*\* Saves conversations and messages in a local SQLite database.
+## Getting Started
 
-\- \*\*Ship 30 for 30:\*\* Generates structured Markdown essays with a hook, narrative progression, and actionable takeaways.
+### Prerequisites
 
-\- \*\*Artifact history:\*\* Saves generated essays for later access.
+- Python
+- Node.js and npm
+- A Groq API key
+- Git
 
-\- \*\*Markdown preview:\*\* View generated content alongside its Markdown source.
-
-\- \*\*Automated tests:\*\* Tests cover transcript retrieval and core API endpoints.
-
-
-
-\## Technology Stack
-
-
-
-\- Frontend: Next.js, React, TypeScript
-
-\- Backend: Python, FastAPI
-
-\- Retrieval: Keyword-based transcript search with term-frequency and inverse-document-frequency scoring
-
-\- Local inference: Ollama
-
-\- Database: SQLite with SQLAlchemy
-
-\- Testing: pytest
-
-
-
-\## Prerequisites
-
-
-
-Install the following:
-
-
-
-\- Python 3.13
-
-\- Node.js and npm
-
-\- Ollama
-
-\- Git
-
-
-
-Pull the local model:
-
-
+### 1. Clone the repository
 
 ```bash
-
-ollama pull qwen2.5:3b
-
+git clone https://github.com/karthika-k22/lenny-growth-assistant.git
+cd lenny-growth-assistant
 ```
 
+### 2. Set up the backend
 
+Create and activate a virtual environment:
 
-\## Run Locally
-
-
-
-\### 1. Start the backend
-
-
-
-From the project root, create and activate a virtual environment if you do not already have one, then install the project's Python dependencies.
-
-
-
-Start the API:
-
-
-
-```powershell
-
-.\\.venv\\Scripts\\python.exe -m uvicorn backend.main:app --reload
-
+```bash
+python -m venv .venv
+.venv\Scripts\activate
 ```
 
+Install dependencies:
 
+```bash
+pip install -r requirements.txt
+```
 
-Backend URL: `http://127.0.0.1:8000`
+Create a `.env` file in the project root using `.env.example` as a reference.
 
+Configure at least:
 
+```env
+GROQ_API_KEY=your_groq_api_key
+JWT_SECRET_KEY=your_long_random_secret
+```
 
-Interactive API documentation: `http://127.0.0.1:8000/docs`
+### 3. Start the backend
 
+```bash
+python -m uvicorn backend.main:app --env-file .env --reload --port 8001
+```
 
+The backend runs at:
 
-\### 2. Start the frontend
+`http://localhost:8001`
 
+Interactive API documentation:
 
+`http://localhost:8001/docs`
 
-Open another terminal:
+### 4. Configure and start the frontend
 
+Create `frontend/.env.local`:
 
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8001
+```
 
-```powershell
+Open a second terminal:
 
+```bash
 cd frontend
-
 npm install
-
 npm run dev
-
 ```
 
+The frontend runs at:
 
+`http://localhost:3000`
 
-Open `http://localhost:3000`.
+## Environment Variables
 
+| Variable | Purpose |
+|---|---|
+| `GROQ_API_KEY` | API key used for Groq inference |
+| `GROQ_MODEL` | Groq-supported model identifier |
+| `JWT_SECRET_KEY` | Secret used to sign authentication tokens |
+| `GOOGLE_CLIENT_ID` | Google authentication configuration |
+| `DATABASE_URL` | Optional database connection URL |
+| `NEXT_PUBLIC_API_URL` | Backend URL configured in the frontend |
 
+If `DATABASE_URL` is not provided, the backend uses its default SQLite database configuration.
 
-\### 3. Prepare transcript search
+For PostgreSQL, provide a valid database connection URL through `DATABASE_URL`.
 
+Never commit `.env`, `.env.local`, API keys, database credentials, or JWT secrets.
 
-
-Place transcript text files (`.txt`) in:
-
-
-
-```text
-
-data/transcripts/
-
-```
-
-
-
-Build or refresh the transcript index using the project's `build\_index()` function from `backend.rag`.
-
-
-
-\### 4. Configure providers
-
-
-
-Select Ollama in the application to use the local model. Ensure Ollama is running and the configured model is available.
-
-
-
-For cloud inference, configure a valid OpenAI API key using the application's supported environment configuration. Never commit API keys or other secrets to Git.
-
-
-
-Local Ollama inference is the recommended option for testing without cloud API usage charges.
-
-
-
-\## API Endpoints
-
-
+## API Endpoints
 
 | Method | Endpoint | Purpose |
-
 |---|---|---|
-
-| GET | `/health` | Health check |
-
-| GET | `/api/models` | Available model/provider options |
-
-| POST | `/api/chat` | Ask a question |
-
+| GET | `/health` | Backend health check |
+| GET | `/api/models` | Model configuration status |
+| POST | `/api/auth/register` | Register a user |
+| POST | `/api/auth/login` | Authenticate a user |
+| POST | `/api/auth/google` | Google authentication |
+| GET | `/api/auth/me` | Retrieve the authenticated user |
+| POST | `/api/chat` | Submit a chat message |
 | POST | `/api/ship-30` | Generate a long-form essay |
-
-| GET | `/api/conversations` | List saved conversations |
-
-| GET | `/api/conversations/{session\_id}` | Retrieve a conversation |
-
+| GET | `/api/conversations` | List conversations |
+| GET | `/api/conversations/{session_id}` | Retrieve a conversation |
+| DELETE | `/api/conversations/{session_id}` | Delete a conversation |
 | GET | `/api/artifacts` | List saved artifacts |
+| DELETE | `/api/history` | Clear conversation history |
 
+## Testing
 
+Run backend tests from the project root:
 
-See `/docs` for the current request and response schemas.
-
-
-
-\## Database and Persistence
-
-
-
-Conversation messages and generated artifacts are stored in a local SQLite database:
-
-
-
-```text
-
-data/lenny\_assistant.db
-
+```bash
+python -m pytest -v
 ```
 
+If Pytest is not installed:
 
-
-This provides local persistence without requiring a separately hosted database service.
-
-
-
-\## Tests
-
-
-
-Run the complete automated test suite from the project root:
-
-
-
-```powershell
-
-.\\.venv\\Scripts\\python.exe -m pytest -v
-
+```bash
+pip install pytest
 ```
 
+Build the frontend:
 
-
-The current tests cover:
-
-
-
-\- Transcript retrieval and source metadata
-
-\- Result limits
-
-\- Empty and irrelevant queries
-
-\- Health, model, conversation, and artifact endpoints
-
-
-
-\## Known Limitations
-
-
-
-\- Retrieval currently uses keyword-based scoring rather than semantic vector embeddings.
-
-\- Answer quality depends on the available transcript corpus and selected model.
-
-\- Cloud inference requires valid API credentials and available provider quota.
-
-\- SQLite persistence is local to the machine unless the database is explicitly deployed or migrated.
-
-\- The current automated tests do not replace manual end-to-end testing of the chat and essay-generation flows.
-
-\- A public production deployment requires appropriate hosting, environment configuration, security review, and persistent storage.
-
-
-
-\## Project Structure
-
-
-
-```text
-
-lenny-growth-assistant/
-
-├── backend/
-
-│   ├── main.py
-
-│   ├── rag.py
-
-│   └── database.py
-
-├── frontend/
-
-│   └── src/
-
-│       └── app/
-
-│           └── page.tsx
-
-├── data/
-
-│   └── transcripts/
-
-├── tests/
-
-│   ├── test\_api.py
-
-│   └── test\_rag.py
-
-├── README.md
-
-└── .gitignore
-
+```bash
+cd frontend
+npm run build
 ```
 
+## Retrieval Approach
 
+The application indexes transcript files stored in `data/transcripts/`.
 
-\## Security Notes
+The retrieval module:
+1. Splits transcript content into manageable chunks.
+2. Associates chunks with source and episode metadata.
+3. Ranks relevant chunks using keyword-based scoring.
+4. Selects the highest-ranked passages as context for the language model.
 
+This is a lightweight retrieval approach rather than an embedding-based semantic search system. Answer relevance depends on the available transcript content and retrieval quality.
 
+## Deployment
 
-\- Keep API keys out of source control.
+The application is deployed using:
 
-\- Do not treat retrieved transcript text as trusted instructions.
+- **Frontend:** Vercel
+- **Backend:** Render
 
-\- Render generated HTML only in an appropriately isolated and sanitized viewer.
+Production environment variables must be configured in the respective hosting dashboards. The frontend's `NEXT_PUBLIC_API_URL` must point to the deployed backend.
 
-\- Do not expose local database files or private environment variables in a public deployment.
+For reliable production persistence, configure a persistent database. A local SQLite file should not be assumed to survive deployments or ephemeral hosting storage.
 
+## Current Limitations
 
+- Retrieval uses keyword-based ranking rather than vector embeddings.
+- Answer quality depends on the coverage and relevance of the available transcripts.
+- AI responses depend on Groq service availability, API limits, and model behavior.
+- Production database persistence and deployment configuration should be verified independently.
+- Automated tests do not replace full end-to-end testing of the deployed application.
 
-\## Development Status
+## License
 
-
-
-This project is a local working prototype. Verify the configured provider, persistence, transcript sources, and artifact-rendering behavior before using it as a production service.
-
-
-
+No open-source license has been specified yet. All rights reserved unless a license is added to this repository.
