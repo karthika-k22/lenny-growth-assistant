@@ -27,7 +27,8 @@ data/knowledge_index.json
 
 # Logs
 *.log
-data/transcripts/
+data/transcripts/*
+!data/transcripts/product_growth.txt
 
 # Temporary local files
 *.bak
