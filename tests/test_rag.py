@@ -41,5 +41,17 @@ def test_search_irrelevant_query_returns_no_results():
 
 
 @pytest.mark.parametrize("top_k", [0, -1, True, "4", None])
+
 def test_search_rejects_invalid_top_k(top_k):
     assert search_transcripts("product growth", top_k=top_k) == []
+
+def test_multi_topic_query_retrieves_both_topics():
+    results = search_transcripts(
+        "How do retention and marketplace supply-demand balance contribute to product growth?",
+        top_k=4,
+    )
+
+    sources = [result["source"] for result in results]
+
+    assert "product_growth_fundamentals.md" in sources
+    assert "product_growth.txt" in sources

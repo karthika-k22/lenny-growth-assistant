@@ -120,7 +120,10 @@ def chunk_markdown(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
     for line in lines:
         if re.match(r"^\s{0,3}#{1,6}\s+", line):
             if current_content:
-                sections.append((current_heading, "\n".join(current_content).strip()))
+                sections.append((
+                    current_heading,
+                    "\n".join(current_content).strip()
+                ))
 
             current_heading = line.strip()
             current_content = []
@@ -128,7 +131,10 @@ def chunk_markdown(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
             current_content.append(line)
 
     if current_content:
-        sections.append((current_heading, "\n".join(current_content).strip()))
+        sections.append((
+            current_heading,
+            "\n".join(current_content).strip()
+        ))
 
     chunks = []
 
@@ -142,7 +148,11 @@ def chunk_markdown(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
             chunks.append(section_text)
             continue
 
-        paragraphs = chunk_paragraphs(content, chunk_size - len(heading), overlap)
+        paragraphs = chunk_paragraphs(
+            content,
+            chunk_size - len(heading),
+            overlap
+        )
 
         for paragraph in paragraphs:
             chunk = f"{heading}\n{paragraph}" if heading else paragraph
@@ -226,49 +236,151 @@ def search_transcripts(query, top_k=4):
         doc_frequency.update(set(record.get("terms", {})))
 
     total = len(records)
-    results = []
 
-    for record in records:
-        terms = record.get("terms") or dict(
-            Counter(tokenize(record["text"]))
+    def score_records(search_query):
+        query_terms, expanded = expand_query_terms(search_query)
+        scored = []
+
+        if not query_terms:
+            return scored
+
+        for record in records:
+            terms = record.get("terms") or dict(
+                Counter(tokenize(record["text"]))
+            )
+
+            score = 0.0
+
+            for term in query_terms:
+                frequency = terms.get(term, 0)
+
+                if frequency:
+                    score += 2.0 * (1 + log(frequency)) * log(
+                        1 + total / (1 + doc_frequency[term])
+                    )
+
+            for term in expanded - query_terms:
+                frequency = terms.get(term, 0)
+
+                if frequency:
+                    score += 0.5 * (1 + log(frequency)) * log(
+                        1 + total / (1 + doc_frequency[term])
+                    )
+
+            matched_original = sum(
+                1 for term in query_terms if terms.get(term, 0) > 0
+            )
+
+            score += 2.0 * matched_original / len(query_terms)
+
+            if score > 0:
+                scored.append({
+                    "episode": record["episode"],
+                    "source": record["source"],
+                    "text": record["text"],
+                    "score": round(score, 3),
+                })
+
+        scored.sort(
+            key=lambda item: item["score"],
+            reverse=True,
         )
 
-        score = 0.0
+        return scored
 
-        for term in original_terms:
-            frequency = terms.get(term, 0)
+    topics = {
+        "retention": {
+            "retention", "churn", "loyalty", "frequency",
+            "repeat", "returning",
+        },
+        "marketplace": {
+            "marketplace", "supply", "demand", "buyers",
+            "sellers", "seller", "buyer",
+        },
+        "acquisition": {
+            "acquisition", "traffic", "discovery", "attract",
+        },
+        "conversion": {
+            "conversion", "purchase", "purchasing", "checkout",
+        },
+        "experimentation": {
+            "experimentation", "experiment", "testing",
+            "abtesting",
+        },
+    }
 
-            if frequency:
-                score += 2.0 * (1 + log(frequency)) * log(
-                    1 + total / (1 + doc_frequency[term])
-                )
+    detected_topics = [
+        topic
+        for topic, keywords in topics.items()
+        if original_terms.intersection(keywords)
+    ]
 
-        for term in expanded_terms - original_terms:
-            frequency = terms.get(term, 0)
+    # Preserve original ranking for single-topic questions.
+    if len(detected_topics) < 2:
+        return score_records(query)[:top_k]
 
-            if frequency:
-                score += 0.5 * (1 + log(frequency)) * log(
-                    1 + total / (1 + doc_frequency[term])
-                )
+    topic_results = []
 
-        matched_original = sum(
-            1 for term in original_terms if terms.get(term, 0) > 0
-        )
+    for topic in detected_topics:
+        topic_terms = original_terms.intersection(topics[topic])
 
-        if original_terms:
-            score += 2.0 * matched_original / len(original_terms)
+        if topic == "marketplace" and {"supply", "demand"}.intersection(topic_terms):
+            topic_terms.discard("marketplace")
 
-        if score > 0:
-            results.append({
-                "episode": record["episode"],
-                "source": record["source"],
-                "text": record["text"],
-                "score": round(score, 3),
-            })
+        topic_query = " ".join(sorted(topic_terms))
+        scored = score_records(topic_query)
 
-    results.sort(
+        if scored:
+            topic_results.append(scored)
+
+    if not topic_results:
+        return score_records(query)[:top_k]
+
+    selected = []
+    selected_keys = set()
+
+    # First pass: retrieve one relevant result per topic.
+    for scored in topic_results:
+        for result in scored:
+            key = (result["source"], result["text"])
+
+            if key not in selected_keys:
+                selected.append(result)
+                selected_keys.add(key)
+                break
+
+    # Second pass: fill remaining slots from topic-specific results.
+    for scored in topic_results:
+        for result in scored:
+            key = (result["source"], result["text"])
+
+            if key not in selected_keys:
+                selected.append(result)
+                selected_keys.add(key)
+
+            if len(selected) >= top_k:
+                break
+
+        if len(selected) >= top_k:
+            break
+
+    # Final fallback: use the original query ranking.
+    if len(selected) < top_k:
+        original_results = score_records(query)
+
+        for result in original_results:
+            key = (result["source"], result["text"])
+
+            if key not in selected_keys:
+                selected.append(result)
+                selected_keys.add(key)
+
+            if len(selected) >= top_k:
+                break
+
+    selected.sort(
         key=lambda item: item["score"],
         reverse=True,
     )
 
-    return results[:top_k]
+    return selected[:top_k]
