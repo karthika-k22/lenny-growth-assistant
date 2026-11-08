@@ -1,8 +1,12 @@
 # Lenny Growth Assistant
 
-A full-stack AI growth assistant that helps users explore product growth concepts through conversational Q&A and generate long-form essays using a transcript-backed knowledge base.
+A full-stack AI-powered product growth research assistant built with Next.js, FastAPI, and Groq. It combines transcript-based retrieval-augmented generation (RAG), conversational AI, secure user authentication, persistent conversation management, and structured essay generation in one application.
 
-**Live application:** https://lenny-growth-assistant-jet.vercel.app
+Explore product management and startup growth concepts, retrieve relevant knowledge from podcast transcripts, and turn insights into long-form content.
+
+**Live Application:** https://lenny-growth-assistant-jet.vercel.app
+
+**Source Code:** https://github.com/karthika-k22/lenny-growth-assistant
 
 ## Features
 
@@ -33,7 +37,21 @@ A full-stack AI growth assistant that helps users explore product growth concept
 
 The application uses a Next.js frontend connected to a FastAPI backend.
 
-For transcript-based questions, the backend retrieves relevant transcript chunks and supplies them as context to the language model. Conversation and artifact data are stored through SQLAlchemy.
+For transcript-based questions, the backend retrieves relevant transcript chunks and supplies them as context to the Groq language model. Conversation and artifact data are stored through SQLAlchemy.
+
+```mermaid
+flowchart TD
+    A[User] --> B[Next.js Frontend]
+    B --> C[FastAPI Backend]
+    C --> D[Authentication & API Logic]
+    C --> E[RAG Retrieval Module]
+    E --> F[Podcast Transcript Knowledge Base]
+    E --> G[Groq LLM]
+    D --> H[SQLAlchemy]
+    H --> I[(SQLite / PostgreSQL)]
+    G --> C
+    C --> B
+```
 
 See [architecture.md](architecture.md) for the system architecture and [design.md](design.md) for the interface and interaction principles.
 
@@ -68,14 +86,14 @@ lenny-growth-assistant/
 - A Groq API key
 - Git
 
-### 1. Clone the repository
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/karthika-k22/lenny-growth-assistant.git
 cd lenny-growth-assistant
 ```
 
-### 2. Set up the backend
+### 2. Set Up the Backend
 
 Create and activate a virtual environment:
 
@@ -99,7 +117,7 @@ GROQ_API_KEY=your_groq_api_key
 JWT_SECRET_KEY=your_long_random_secret
 ```
 
-### 3. Start the backend
+### 3. Start the Backend
 
 ```bash
 python -m uvicorn backend.main:app --env-file .env --reload --port 8001
@@ -113,7 +131,7 @@ Interactive API documentation:
 
 `http://localhost:8001/docs`
 
-### 4. Configure and start the frontend
+### 4. Configure and Start the Frontend
 
 Create `frontend/.env.local`:
 
@@ -194,6 +212,7 @@ npm run build
 The application indexes transcript files stored in `data/transcripts/`.
 
 The retrieval module:
+
 1. Splits transcript content into manageable chunks.
 2. Associates chunks with source and episode metadata.
 3. Ranks relevant chunks using keyword-based scoring.
